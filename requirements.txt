@@ -1,0 +1,8 @@
+# Phase 1 dependency baseline; expand as later phases are implemented.
+tushare==1.4.29
+pandas==3.0.5
+duckdb==1.5.5
+python-dotenv==1.2.3
+
+# Development validation
+pytest==9.1.1
