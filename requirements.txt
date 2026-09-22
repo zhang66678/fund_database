@@ -3,6 +3,8 @@ tushare==1.4.29
 pandas==3.0.5
 duckdb==1.5.5
 python-dotenv==1.2.3
+streamlit==1.64.0
+plotly==7.1.0
 
 # Development validation
 pytest==9.1.1

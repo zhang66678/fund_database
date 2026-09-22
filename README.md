@@ -12,7 +12,7 @@
 - 当前环境 Python 版本：3.14.3。后续新增依赖时逐项验证兼容性。
 - `requirements.txt` 记录当前阶段直接依赖及已安装版本，不是完整的传递依赖锁文件。
 - 已安装第一阶段依赖：Tushare、Pandas、DuckDB、python-dotenv 和 pytest，并验证基本导入、配置解析与内存数据库查询。
-- Streamlit、Plotly 等依赖在后续对应阶段引入。
+- 已增加 Streamlit 和 Plotly, 用于本地净值曲线 demo.
 
 ## 本地环境
 
@@ -31,6 +31,16 @@ python -m venv .venv
 ```
 
 项目根目录的 `.env` 用于保存 `TUSHARE_TOKEN`。已有文件应保留；不要将真实 Token 写入代码、日志、截图或 Git。当前尚未实现 `.env` 自动加载，后续统一在配置模块中处理。
+
+## 可视化 demo 进度
+
+已完成 CSV 数据访问层, `FundService` 服务层和 Streamlit + Plotly 页面. 输入基金代码, 选择日期和净值类型后, 可查看净值曲线. 日期可选范围为 1900-01-01 至今天. 当前使用本地样本 CSV, 尚未接入真实数据库存储. 详见 [页面启动与使用说明](app/README.md) 和 [数据访问层说明](database/README.md).
+
+在项目根目录启动:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
+```
 
 ## 分层约定
 
