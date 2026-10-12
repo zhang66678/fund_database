@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-已完成工作区检查与基础准备，尚未实现配置加载、API 客户端、数据库、ETL 或页面。
+已建立 API 请求封装、DuckDB 数据库、数据导入与增量更新流程，以及基金查询和可视化页面。当前逐步完善正式分层模块，集中配置仍待后续整理。
 
-按当前开发安排, 暂缓正式 Phase 1, 先进行[场外基金数据探索](research/README.md). 已实现基金清单获取, 最长存续 10 个代码筛选, 以及样本的历史净值, 分红和复权因子请求. 具体接口覆盖与缺失情况见探索说明和运行摘要. 探索代码不属于正式分层模块.
+[场外基金数据探索](research/README.md) 保留基金清单获取、最长存续 10 个代码筛选和样本历史数据调研。共用请求封装与字段已移入 `api/`，分页和日期分段获取已移入 `etl/extract.py`。正式程序不依赖 `research/`，探索脚本复用正式模块。
 
 - 开发环境：Windows、VS Code、Python 虚拟环境 `.venv`。
 - 当前环境 Python 版本：3.14.3。后续新增依赖时逐项验证兼容性。
@@ -30,11 +30,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-项目根目录的 `.env` 用于保存 `TUSHARE_TOKEN`。已有文件应保留；不要将真实 Token 写入代码、日志、截图或 Git。当前尚未实现 `.env` 自动加载，后续统一在配置模块中处理。
+项目根目录的 `.env` 用于保存 `TUSHARE_TOKEN`。已有文件应保留；不要将真实 Token 写入代码、日志、截图或 Git。`api/tushare_client.py` 优先使用环境变量，否则加载项目根目录的 `.env`。
 
 ## 可视化 demo 进度
 
-已完成 CSV 数据访问层, `FundService` 服务层和 Streamlit + Plotly 页面. 输入基金代码, 选择日期和净值类型后, 可查看净值曲线. 日期可选范围为 1900-01-01 至今天. 当前使用本地样本 CSV, 尚未接入真实数据库存储. 详见 [页面启动与使用说明](app/README.md) 和 [数据访问层说明](database/README.md).
+已完成 DuckDB 数据访问层, `FundService` 服务层和 Streamlit + Plotly 页面, 可查询净值曲线和七项收益风险指标. 已建立单基金数据库并导入基础资料, 净值, 分红及交易日历, 支持重复导入和事务回滚. 页面默认查询 DuckDB, CSV 模式保留用于对照. 详见 [页面启动与使用说明](app/README.md) 和 [数据库说明](database/README.md).
 
 在项目根目录启动:
 

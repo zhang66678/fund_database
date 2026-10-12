@@ -12,14 +12,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from research.tushare_source import FetchError, ROOT, Source
+from api.fund_fields import BASIC
+from api.tushare_client import FetchError, ROOT, Source
+from etl.extract import paged
 
 LOGGER = logging.getLogger(__name__)
-# 显式请求基金档案的 25 个字段, 便于核对返回结构, 不依赖接口默认列.
-BASIC = ('ts_code,name,management,custodian,fund_type,found_date,due_date,list_date,'
-         'issue_date,delist_date,issue_amount,m_fee,c_fee,duration_year,p_value,'
-         'min_amount,exp_return,benchmark,status,invest_type,type,trustee,'
-         'purc_startdate,redm_startdate,market')
 
 
 def save_json(path: Path, payload: dict | list) -> None:
@@ -30,30 +27,6 @@ def save_json(path: Path, payload: dict | list) -> None:
 def save_csv(path: Path, frame: pd.DataFrame) -> None:
     """保存不含 DataFrame 行索引的 CSV; 使用 BOM 方便 Windows 软件识别中文."""
     frame.to_csv(path, index=False, encoding='utf-8-sig')
-
-
-def paged(source, endpoint: str, fields: str, size: int = 1000, **params) -> pd.DataFrame:
-    """分页读取直到空页; 如果服务器重复返回同一页, 则报错停止.
-
-    size 是请求的每页行数, offset 是已经读取的行数.
-    即使某页不足 size 行, 也继续请求, 防止服务器另有较小的行数上限.
-    """
-    frames = []
-    seen = set()
-    offset = 0
-    # 设置页数保护, 避免异常接口让探索任务无限请求.
-    for _ in range(200):
-        frame = source.query(endpoint, fields, limit=size, offset=offset, **params)
-        if frame.empty:
-            return pd.concat(frames, ignore_index=True) if frames else frame
-        # 用不含行索引的页面内容识别重复页, 检查 offset 是否被忽略.
-        signature = frame.to_json(orient='split', index=False)
-        if signature in seen:
-            raise FetchError(f'{endpoint}: repeated page; completeness not established')
-        seen.add(signature)
-        frames.append(frame)
-        offset += len(frame)  # 按实际返回行数前进, 而不是按请求的 size 前进.
-    raise FetchError(f'{endpoint}: page safety limit reached')
 
 
 def fetch_list(source: Source, folder: Path, as_of: date) -> None:

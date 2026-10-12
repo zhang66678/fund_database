@@ -1,6 +1,7 @@
 """通过页面交互验证查询链路, 使用临时数据且不访问网络."""
 
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -106,3 +107,23 @@ def test_missing_file_shows_error(page, monkeypatch, tmp_path):
     page.button[0].click().run()
     assert not page.exception
     assert len(page.error) == 1
+
+
+def test_metrics_do_not_depend_on_visible_nav_types(page, tmp_path, monkeypatch):
+    nav_path = Path(os.environ["NAV_CSV"])
+    nav = pd.read_csv(nav_path)
+    nav["adj_nav"] = [1.2, 1.3, 1.4]
+    nav.to_csv(nav_path, index=False)
+    calendar_path = tmp_path / "trade_cal.csv"
+    pd.DataFrame({"exchange": ["SSE"] * 3, "cal_date": ["20200101", "20200102", "20200103"],
+                  "is_open": [1, 1, 1]}).to_csv(calendar_path, index=False)
+    monkeypatch.setenv("CALENDAR_CSV", str(calendar_path))
+    page.button[0].click().run()
+    assert not page.exception and not page.error
+    assert len(page.metric) == 7
+    assert next(m.value for m in page.metric if m.label == "最大回撤") == "0.00%"
+    before = [m.value for m in page.metric]
+    page.checkbox(key="adj_nav").uncheck()
+    page.button[0].click().run()
+    assert [m.value for m in page.metric] == before
+    assert not page.dataframe

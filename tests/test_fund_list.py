@@ -3,8 +3,8 @@
 import pandas as pd
 import pytest
 
-from research.explore_funds import paged
-from research.tushare_source import FetchError
+from etl.extract import paged
+from api.tushare_client import FetchError
 
 
 def test_pagination_continues_after_a_short_page():

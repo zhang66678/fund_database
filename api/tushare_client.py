@@ -1,4 +1,4 @@
-"""基金探索使用的只读 Tushare 请求封装, 不负责数据保存或业务计算."""
+"""通用 Tushare 请求封装, 不负责数据保存或业务计算."""
 
 import logging
 import os
@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FetchError(RuntimeError):
-    """探索任务的可预期错误; 错误信息应不含凭证, 可写入日志."""
+    """数据获取的可预期错误; 错误信息应不含凭证, 可写入日志."""
 
 
 class Source:

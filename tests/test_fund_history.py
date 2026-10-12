@@ -5,8 +5,9 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from research.fetch_fund_history import combine_nav, fetch_series
-from research.tushare_source import FetchError
+from research.fetch_fund_history import combine_nav
+from etl.extract import fetch_series
+from api.tushare_client import FetchError
 
 
 def test_windows_cover_leap_day_and_end_date_without_overlap():

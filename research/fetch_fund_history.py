@@ -11,32 +11,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from research.explore_funds import paged
+from api.fund_fields import NAV_FIELDS, ADJ_FIELDS, DIV_FIELDS
+from etl.extract import paged, fetch_series
 from research.select_longest_funds import latest_snapshot
-from research.tushare_source import ROOT, FetchError, Source
+from api.tushare_client import ROOT, FetchError, Source
 
 LOGGER = logging.getLogger(__name__)
-NAV_FIELDS = 'ts_code,ann_date,nav_date,unit_nav,accum_nav,adj_nav,accum_div'
-ADJ_FIELDS = 'ts_code,trade_date,adj_factor'
-DIV_FIELDS = 'ts_code,ann_date,div_proc,record_date,ex_date,pay_date,div_cash,net_ex_date,account_date'
-
-
-def fetch_series(source, endpoint: str, fields: str, code: str,
-                 start: date, end: date) -> pd.DataFrame:
-    """按两年窗口请求, 避免长历史被截断, 保留源数据的实际披露日期."""
-    parts = []
-    date_col = 'nav_date' if endpoint == 'fund_nav' else 'trade_date'
-    for year in range(start.year, end.year + 1, 2):
-        left = max(start, date(year, 1, 1)).strftime('%Y%m%d')
-        right = min(end, date(year + 1, 12, 31)).strftime('%Y%m%d')
-        part = source.query(endpoint, fields, ts_code=code, start_date=left, end_date=right)
-        if len(part) >= 2000:
-            raise FetchError(f'{endpoint}: possible truncation for {left}-{right}')
-        if not part.empty and (not part[date_col].between(left, right).all()
-                               or not part['ts_code'].eq(code).all()):
-            raise FetchError(f'{endpoint}: invalid code/date range')
-        parts.append(part)
-    return pd.concat(parts, ignore_index=True).drop_duplicates()
 
 
 def combine_nav(nav: pd.DataFrame, factors: pd.DataFrame) -> pd.DataFrame:

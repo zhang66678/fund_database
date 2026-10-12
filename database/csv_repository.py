@@ -32,8 +32,10 @@ class CsvFundRepository:
     当前样本规模适合内存读取, 全量数据阶段应替换为数据库查询.
     """
 
-    def __init__(self, nav_path: Path, names_path: Path | None = None) -> None:
+    def __init__(self, nav_path: Path, names_path: Path | None = None,
+                 calendar_path: Path | None = None) -> None:
         self._names_path = names_path
+        self._calendar_path = calendar_path
         nav = _read_columns(nav_path, ["ts_code", "ann_date", *NAV_COLUMNS])
         if nav.ts_code.fillna("").str.strip().eq("").any():
             raise ValueError("NAV contains missing codes")
@@ -54,6 +56,13 @@ class CsvFundRepository:
                 raise ValueError("Missing or duplicate codes in fund names")
             names = frame.set_index("ts_code")["name"].dropna().to_dict()
         return {code: names.get(code, "名称未提供") for code in sorted(self._nav.ts_code.unique())}
+
+    def get_calendar(self) -> pd.DataFrame:
+        """仅在计算指标时读取日历, 不影响单独查询净值."""
+        if self._calendar_path is None:
+            raise ValueError("尚未配置交易日历, 暂不能计算指标")
+        frame = _read_columns(self._calendar_path, ["exchange", "cal_date", "is_open"])
+        return frame.loc[frame.exchange.eq("SSE"), ["cal_date", "is_open"]].copy()
 
     def get_nav(
         self, ts_code: str, start_date: date | None = None,

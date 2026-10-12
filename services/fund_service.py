@@ -7,6 +7,7 @@ from datetime import date
 import pandas as pd
 
 from database.repository import FundRepository, NAV_COLUMNS
+from services.fund_metrics import calculate_metrics
 
 
 class FundService:
@@ -18,6 +19,11 @@ class FundService:
     def list_available_funds(self) -> dict[str, str]:
         """提供本地基金选择项, 不读取文件或依赖页面组件."""
         return self._repository.list_available_funds()
+
+    def get_metrics(self, ts_code: str, start_date: date, end_date: date) -> dict:
+        """指标始终采用复权净值, 不受页面勾选的曲线类型影响."""
+        nav = self.get_nav(ts_code, start_date, end_date, ["adj_nav"])
+        return calculate_metrics(nav, self._repository.get_calendar())
 
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
