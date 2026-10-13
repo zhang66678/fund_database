@@ -32,6 +32,16 @@ python -m venv .venv
 
 项目根目录的 `.env` 用于保存 `TUSHARE_TOKEN`。已有文件应保留；不要将真实 Token 写入代码、日志、截图或 Git。`api/tushare_client.py` 优先使用环境变量，否则加载项目根目录的 `.env`。
 
+新电脑首次使用时，先建空库，再添加基金并获取数据：
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.init_database
+.\.venv\Scripts\python.exe -m scripts.add_fund 000001.OF
+.\.venv\Scripts\python.exe -m scripts.update_database
+```
+
+仅建库不需要 Token，后两步需要配置 Token 和相应接口权限。已有单基金快照时，可用 `scripts.init_database --snapshot 快照目录` 直接建库并导入。数据库和快照不随 Git 克隆，详细说明见 [数据库说明](database/README.md)。
+
 ## 可视化 demo 进度
 
 已完成 DuckDB 数据访问层, `FundService` 服务层和 Streamlit + Plotly 页面, 可查询净值曲线和七项收益风险指标. 已建立单基金数据库并导入基础资料, 净值, 分红及交易日历, 支持重复导入和事务回滚. 页面默认查询 DuckDB, CSV 模式保留用于对照. 详见 [页面启动与使用说明](app/README.md) 和 [数据库说明](database/README.md).

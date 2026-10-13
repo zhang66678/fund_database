@@ -49,7 +49,7 @@ Stop-Process -Id $demoTunnelId
 - `FundService`: 规范代码, 校验输入, 选择净值列, 调用 `fund_metrics.py` 计算指标.
 - `CsvFundRepository`: 读取 CSV, 日期筛选和公告版本处理.
 
-默认查询 `data/fund_database.duckdb`, 基金名称, 净值和日历均来自数据库. 首次使用需先执行 `python -m scripts.init_database`. 可通过 `DATABASE_PATH` 环境变量指定其他数据库文件, 相对路径以项目根目录为基准.
+默认查询 `data/fund_database.duckdb`, 基金名称, 净值和日历均来自数据库. 首次使用先执行 `python -m scripts.init_database` 建空库, 再添加基金并更新数据; 也可使用 `--snapshot` 导入已有单基金快照. 只有空库时页面没有可展示的基金数据. 具体命令见 [数据库说明](../database/README.md). 可通过 `DATABASE_PATH` 环境变量指定其他数据库文件, 相对路径以项目根目录为基准.
 
 显式设置 `NAV_CSV` 会优先切换至 CSV 模式, 例如切回原有 10 基金曲线:
 

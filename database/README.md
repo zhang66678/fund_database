@@ -29,13 +29,21 @@
 - `etl/import_snapshot.py`: CSV 类型转换, 去重, 质量检查与事务导入.
 - `scripts/init_database.py`: 命令行入口及日志配置.
 
-在项目根目录重复导入:
+在项目根目录仅创建数据库和四张空表, 不需要快照或 Tushare Token:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.init_database
 ```
 
-可以通过 `--snapshot` 和 `--database` 指定其他快照或数据库路径. 当前入口仅接受单基金快照, 不会请求 Tushare. 日志位于 `logs/database_import.log`, 数据库和日志不提交 Git.
+重复执行只创建缺失的表, 保留已有数据. 可通过 `--database` 指定数据库路径. 建库后可以运行 `scripts.add_fund` 添加基金资料, 再运行 `scripts.update_database` 获取历史数据.
+
+如需导入已有单基金快照, 显式指定目录:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.init_database --snapshot data/single_fund_audit/20261012_093903
+```
+
+快照导入会在同一事务中建表并写入数据, 不需要事先单独建库. 当前仅接受单基金快照, 初始化入口不会请求 Tushare. 日志位于 `logs/database_import.log`, 数据库和日志不提交 Git.
 
 启动 Python 后只读查看:
 
