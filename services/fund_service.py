@@ -10,6 +10,16 @@ from database.repository import FundRepository, NAV_COLUMNS
 from services.fund_metrics import calculate_metrics
 
 
+def _normalize_code(ts_code: str) -> str:
+    """净值和基金资料查询共用代码校验, 支持六位代码和 .OF 后缀."""
+    code = ts_code.strip().upper()
+    if re.fullmatch(r"[0-9]{6}", code):
+        code += ".OF"
+    if not re.fullmatch(r"[0-9]{6}\.OF", code):
+        raise ValueError("请输入六位基金代码, 例如 000001 或 000001.OF")
+    return code
+
+
 class FundService:
     """接收数据访问接口, CSV 和未来数据库实现可以使用同一服务."""
 
@@ -25,6 +35,20 @@ class FundService:
         nav = self.get_nav(ts_code, start_date, end_date, ["adj_nav"])
         return calculate_metrics(nav, self._repository.get_calendar())
 
+    def get_details(self, ts_code: str) -> dict:
+        """提供经理任职记录及最新资产披露, 一类资料失败不影响另一类."""
+        code = _normalize_code(ts_code)
+        result = {"code": code, "managers": [], "asset": None, "errors": {}}
+        for key, query in (("managers", self._repository.get_managers), ("asset", self._repository.get_assets)):
+            try:
+                frame = query(code)
+                result[key] = frame.to_dict("records") if key == "managers" else (
+                    None if frame.empty else frame.iloc[-1].to_dict())
+            except (ValueError, OSError, UnicodeError) as exc:
+                # 返回具体资料的失败原因, 由页面展示并记录日志, 不隐瞒读取错误.
+                result["errors"][key] = str(exc)
+        return result
+
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
         end_date: date | None = None, nav_types: Sequence[str] | None = None,
@@ -33,11 +57,7 @@ class FundService:
 
         显式传入空列表时报错. 没有数据时保留空表, 不补造净值.
         """
-        code = ts_code.strip().upper()
-        if re.fullmatch(r"[0-9]{6}", code):
-            code += ".OF"
-        if not re.fullmatch(r"[0-9]{6}\.OF", code):
-            raise ValueError("请输入六位基金代码, 例如 000001 或 000001.OF")
+        code = _normalize_code(ts_code)
         if start_date is not None and end_date is not None and start_date > end_date:
             raise ValueError("开始日期不能晚于结束日期")
 

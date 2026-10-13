@@ -18,7 +18,8 @@ FILES = {"fund_basic": "fund_basic.csv", "fund_nav": "fund_nav.csv",
 def normalize(table: str, source: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """CSV 和接口响应共用类型转换及主键检查."""
     spec = TABLES[table]
-    frame = source.loc[:, list(spec["columns"])].astype("string").copy()
+    # Tushare 部分缺失日期返回空格, 与空字符串一起转换为 NULL.
+    frame = source.loc[:, list(spec["columns"])].astype("string").replace(r"^\s*$", pd.NA, regex=True)
     for column, kind in spec["columns"].items():
         if kind == "DATE":
             frame[column] = pd.to_datetime(frame[column], format="%Y%m%d", errors="raise").dt.date

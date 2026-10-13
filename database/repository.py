@@ -7,6 +7,8 @@ import pandas as pd
 
 
 NAV_COLUMNS = ["nav_date", "unit_nav", "accum_nav", "adj_nav"]
+MANAGER_COLUMNS = ["ann_date", "name", "begin_date", "end_date", "edu", "resume"]
+ASSET_COLUMNS = ["ann_date", "nav_date", "net_asset", "total_netasset"]
 
 
 class FundRepository(Protocol):
@@ -32,4 +34,18 @@ class FundRepository(Protocol):
 
     def get_calendar(self) -> pd.DataFrame:
         """返回 SSE 日历的 cal_date, is_open 列, 供日频指标使用."""
+        ...
+
+    def get_managers(self, ts_code: str) -> pd.DataFrame:
+        """返回 MANAGER_COLUMNS, 同一姓名和任期取最新公告, 按任职日期倒序.
+
+        不根据离任日期缺失推断在任. 未支持此项的数据源抛出 ValueError.
+        """
+        ...
+
+    def get_assets(self, ts_code: str) -> pd.DataFrame:
+        """返回 ASSET_COLUMNS, 每个净值日期取最新公告, 按日期升序.
+
+        保留两种资产口径和缺失值, 不换算单位. 未支持此项的数据源抛出 ValueError.
+        """
         ...

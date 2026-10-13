@@ -1,4 +1,4 @@
-"""单基金 MVP 的四张表, 仅使用常规关系型字段和主键."""
+"""基金数据库表结构, 仅使用常规关系型字段和主键."""
 
 
 TABLES = {
@@ -26,6 +26,17 @@ TABLES = {
     "trade_calendar": {
         "columns": {"exchange": "VARCHAR", "cal_date": "DATE", "is_open": "INTEGER"},
         "key": ("exchange", "cal_date"),
+    },
+    "fund_manager": {
+        "columns": {"ts_code": "VARCHAR", "ann_date": "DATE", "name": "VARCHAR",
+                    "begin_date": "DATE", "end_date": "DATE", "edu": "VARCHAR", "resume": "VARCHAR"},
+        # 姓名不是永久人员 ID, 保留不同公告及重复任职的记录.
+        "key": ("ts_code", "name", "begin_date", "ann_date"),
+    },
+    "fund_asset": {
+        "columns": {"ts_code": "VARCHAR", "ann_date": "DATE", "nav_date": "DATE",
+                    "net_asset": "DECIMAL(24,10)", "total_netasset": "DECIMAL(24,10)"},
+        "key": ("ts_code", "nav_date", "ann_date"),
     },
 }
 

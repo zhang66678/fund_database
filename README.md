@@ -40,7 +40,16 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m scripts.update_database
 ```
 
-仅建库不需要 Token，后两步需要配置 Token 和相应接口权限。已有单基金快照时，可用 `scripts.init_database --snapshot 快照目录` 直接建库并导入。数据库和快照不随 Git 克隆，详细说明见 [数据库说明](database/README.md)。
+仅建库不需要 Token，后续数据获取需要配置 Token 和相应接口权限。`update_database` 统一更新基础资料、净值、分红、基金经理、资产及交易日历。已有单基金快照时，可用 `scripts.init_database --snapshot 快照目录` 直接建库并导入。数据库和快照不随 Git 克隆，详细说明见 [数据库说明](database/README.md)。
+
+更新时不指定条目即更新全部，也可通过 `--datasets` 选择一项或多项：
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets asset
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav asset
+```
+
+支持 `basic`、`nav`、`dividend`、`manager`、`asset`、`calendar`。`--full-history`、`--refresh-days` 和 `--end-date` 可与条目选择组合使用。
 
 ## 可视化 demo 进度
 
@@ -105,7 +114,7 @@ git status --short --untracked-files=all
 
 ## Tushare公募基金数据接口
 
-当前程序使用 `fund_basic`, `fund_nav`, `fund_div`, `fund_adj`. 以下输出字段列出程序实际请求的字段, 不代表接口的全部可选字段. 其余接口保留为后续调研条目, 暂未在探索程序中调用. 日期参数统一使用 `YYYYMMDD`.
+当前程序使用 `fund_basic`, `fund_nav`, `fund_div`, `fund_adj`, `fund_manager`. 以下输出字段列出程序实际请求的字段, 不代表接口的全部可选字段. 其余接口保留为后续调研条目. 日期参数统一使用 `YYYYMMDD`.
 
 ### 基金列表 `fund_basic`
 
@@ -187,8 +196,36 @@ git status --short --untracked-files=all
 输出
 
 ### 基金经理 `fund_manager`
+
+用途: 获取库内基金的经理介绍和任职历史. 调用入口: `scripts/update_database.py`, 获取与入库流程: `etl/update_funds.py`. [官方文档](https://tushare.pro/document/2?doc_id=208).
+
 输入
 
+`ts_code` 基金代码, 从数据库清单逐只读取
+
+`limit` 每页请求 1000 行, 官方单次最大 5000 行
+
+`offset` 从 0 开始请求, 按实际返回行数递增, 直到空页
+
+`fields` 显式请求下列 7 个字段; 不传 `ann_date` 和 `name` 条件, 获取全部返回的任职记录
+
+输出
+
+`ts_code` 基金代码
+
+`ann_date` 公告日期
+
+`name` 基金经理姓名
+
+`begin_date` 任职日期
+
+`end_date` 离任日期, 空格转换为 NULL, 不据此认定在任
+
+`edu` 学历
+
+`resume` 简历
+
+保存至 `fund_manager`, 保留不同任期和公告版本. 不采集性别, 出生年份和国籍. 官方要求至少 500 积分, 2000 积分以上可提高访问频次. 当前请求节奏沿用客户端间隔和重试配置.
 
 ### 基金业绩基准 `mkt_idx_bmk`
 
@@ -230,7 +267,9 @@ git status --short --untracked-files=all
 
 `accum_div` 累计分红, 空值不能解释为没有分红
 
-官方还提供 `net_asset` 资产净值和 `total_netasset` 合计资产净值, 本次为精简数据未请求. 保存至 `nav.csv`, 不补齐非披露日期. 本次 10 只样本的 `accum_div` 大量缺失.
+原探索程序保存至 `nav.csv`, 不补齐非披露日期. 2026-09-21 的 10 只样本中 `accum_div` 大量缺失.
+
+统一更新程序 `etl/update_funds.py` 另请求 `ts_code,ann_date,nav_date,net_asset,total_netasset`, 分别为基金代码, 公告日期, 净值日期, 资产净值和合计资产净值. 只将至少一项资产非空的行保存至 `fund_asset`, 不改变原有 `fund_nav` 字段. 首次历史回填, 后续按资产表末日滚动更新, 可用 `--full-history` 复查旧日期补录和修订. 原始金额和两种资产口径分别保留, 官方未明确单位和合计范围, 暂不换算为亿元. 当前样本的资产数据低于日频披露, 不前向填充.
 
 ### 基金复权因子 `fund_adj`
 

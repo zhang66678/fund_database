@@ -4,7 +4,7 @@
 
 已建立 `data/fund_database.duckdb`, 导入华夏成长核查快照 `data/single_fund_audit/20261012_093903/`. 页面默认已通过 `DuckDBFundRepository` 查询数据库.
 
-| 表 | 当前行数 | 主键 |
+| 表 | 首次单基金快照导入行数 | 主键 |
 | --- | --- | --- |
 | fund_basic | 1 | ts_code |
 | fund_nav | 6027 | ts_code, nav_date, ann_date |
@@ -24,12 +24,12 @@
 实现文件:
 
 - `connection.py`: 默认路径与连接生命周期.
-- `schema.py`: 四张表的字段和约束.
+- `schema.py`: 核心四张表及经理, 资产两张补充表的字段和约束.
 - `writer.py`: 数据库 UPSERT 和写入数量统计.
 - `etl/import_snapshot.py`: CSV 类型转换, 去重, 质量检查与事务导入.
 - `scripts/init_database.py`: 命令行入口及日志配置.
 
-在项目根目录仅创建数据库和四张空表, 不需要快照或 Tushare Token:
+在项目根目录仅创建数据库和六张空表, 不需要快照或 Tushare Token:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.init_database
@@ -75,7 +75,7 @@ with connect(read_only=True) as db:
 
 也支持 `040001` 和小写后缀. 程序从 Tushare 获取名称, 成立日期等资料, 写入 `fund_basic`, 不需要手动编辑数据库. 重复添加只更新变化的资料, 不重复插入, 也不删除历史数据. 当前仅支持场外基金. 日志在 `logs/add_fund.log`.
 
-然后运行下面的更新命令. 新基金没有净值时会从成立日回填; 有净值后才出现在页面下拉列表里. 添加和更新均可用 `--database` 指定数据库, 两次需指向同一文件. 添加基金前也应停止网站以避免写入锁冲突.
+然后运行下面的更新命令, 同时获取净值, 分红, 经理和资产资料. 新基金没有净值或资产时会从成立日回填; 有净值后才出现在页面下拉列表里. 添加和更新均可用 `--database` 指定数据库, 两次需指向同一文件. 添加基金前也应停止网站以避免写入锁冲突.
 
 在项目根目录运行, 更新前先停止 Streamlit, 避免独立进程的 DuckDB 文件锁冲突:
 
@@ -83,14 +83,39 @@ with connect(read_only=True) as db:
 .\.venv\Scripts\python.exe -m scripts.update_database
 ```
 
+不传 `--datasets` 时更新全部数据. 指定后只请求和写入对应条目, 可一次选择多个:
+
+| 参数值 | 更新内容 |
+| --- | --- |
+| basic | 基金基础资料 |
+| nav | 单位净值, 累计净值, 复权单位净值及累计分红字段 |
+| dividend | 分红披露记录 |
+| manager | 基金经理任职历史 |
+| asset | 资产净值及合计资产净值 |
+| calendar | SSE 交易日历 |
+
+```powershell
+# 只更新资产信息
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets asset
+
+# 只更新净值
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav
+
+# 同时更新净值和资产
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav asset
+```
+
+指定条目后不会自动更新其他条目. 净值和资产需要的成立日期直接读取数据库, 不额外请求基金基础资料; 日期缺失会记录失败. 日历只在选中 `calendar` 或默认全部更新时请求. `asset` 和 `nav` 虽来自同一接口, 分别请求各自字段并写入各自表. 未选中的业务记录保留不变.
+
 任务从数据库 `fund_basic` 读取代码, 名称, 市场和成立日期, 并关联每只基金的最新净值日. 名称用于日志, 代码用于 API 请求, 不使用固定清单或 `top_10.csv`, 不按存续状态排除基金. 今后将基金资料加入此表后, 同一程序即可处理, 无须修改基金代码列表.
 
 - 净值从最后净值日前回看 7 个日历日 (含该日), 获取至任务截止日. 停更后会覆盖中间未更新的时间, 长区间继续分段请求. 无净值的基金从成立日获取.
 - 基础资料重新获取并更新名称和状态; 分红记录量小, 每只基金重新分页获取后去重并 UPSERT. 不删除历史记录.
+- 经理重新分页获取全部任职记录; 资产根据资产表自己的最新日期滚动更新, 两项资产全空的行不保存. 同一次命令完成, 无需另行操作.
 - SSE 日历每轮更新一次, 从库内日历末日回看, 不为每只基金重复请求.
-- 每只基金的基础资料, 净值和分红共同提交; 某只失败则不提交该基金的修改, 继续其他基金. 下次重跑重试失败基金.
+- 每只基金所选的基础资料, 净值和分红共同提交, 本批失败则回滚. 所选的经理和资产各自提交, 接口失败不撤销其他已成功的数据, 继续其他任务. 存在失败时整体状态为 partial, 下次运行重新尝试.
 - 净值返回空表时保留原数据, 日志标记 `empty_nav`, 不能据此证明该基金没有遗漏或已经完整. 当前不做自动停运判定.
-- 历史窗口外的净值修订仍需扩大回看区间另行补查. 回看窗口不是完整历史质量保证.
+- 历史窗口外的净值或资产修订可以扩大回看区间, 或使用 `--full-history` 重新获取全部历史. 回看窗口不是完整历史质量保证.
 - 当前分红表要求公告日期和除息日等主键非空. 若接口返回未明确日期的方案, 本轮该基金会记录失败, 等后续明确事件模型后再处理, 不补造主键.
 
 可调整窗口, 截止日和数据库:
@@ -99,13 +124,63 @@ with connect(read_only=True) as db:
 .\.venv\Scripts\python.exe -m scripts.update_database --refresh-days 30 --end-date 2026-10-12 --database data/fund_database.duckdb
 ```
 
-日志为 `logs/database_update.log`, 每次运行另存一个 `database_update_时间戳.json` 结果摘要, 含各基金状态及新增, 更新, 未变化数量. `partial` 返回非零退出码. 暂不自动发现数据库之外的新基金, 不做并发请求或持久化任务队列.
+日志为 `logs/database_update.log`, 每次运行另存一个 `database_update_时间戳.json` 结果摘要, `datasets` 列出本次选择的条目, 含各基金状态及所选表的新增, 更新, 未变化数量. `details` 记录所选经理和资产的接口状态, 重复行及忽略的全空行. `partial` 返回非零退出码. 暂不自动发现数据库之外的新基金, 不做并发请求或持久化任务队列.
 
 实现: `etl/update_funds.py` 负责更新流程, `scripts/update_database.py` 提供命令入口. `api/tushare_client.py` 统一处理限频, 重试和凭证脱敏, `api/fund_fields.py` 维护请求字段, `etl/extract.py` 负责分页和日期分段获取. 复用快照导入的类型转换和数据库 UPSERT, 正式运行不依赖 research 目录.
+
+## 基金经理和资产披露资料
+
+经理和资产资料已合并到日常更新流程, 从数据库 `fund_basic` 读取基金代码与成立日期, 包含已终止基金. 当前选用以下信息:
+
+| 表 | 来源接口 | 保存字段 | 主键 |
+| --- | --- | --- | --- |
+| fund_manager | fund_manager | ts_code, ann_date, name, begin_date, end_date, edu, resume | ts_code, name, begin_date, ann_date |
+| fund_asset | fund_nav | ts_code, ann_date, nav_date, net_asset, total_netasset | ts_code, nav_date, ann_date |
+
+基金类型, 投资类型, 基金公司, 托管人, 管理费, 托管费及业绩基准已经保存在 `fund_basic`, 无须重复建表. 基金持仓作为后续步骤, 需区分报告期, 公告版本和披露范围. `fund_share` 文档的市场参数为 SH/SZ, 输出为基金份额, 本轮不作为场外基金资产规模来源.
+
+停止网站后运行:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_database
+```
+
+统一更新入口自动为旧数据库创建缺失表, 不改动原有表结构和数据. 实现集中在 `etl/update_funds.py`, 使用现有 API 客户端, 分页, 日期分段, 类型转换和 UPSERT. 没有数据库时先初始化, 空基金清单不会发起请求.
+
+- 经理记录量小, 每次重新分页获取全部任职记录. 日期中的空格转为 NULL. 离任日期缺失只表示接口未提供, 不能据此认定仍在任职. 姓名不是永久人员 ID, 暂不合并跨基金同名人员.
+- 资产首次从成立日起按两年分段回填, 后续从资产表自己的最后披露日前回看 7 个日历日, 不能用日频净值末日代替资产末日. 窗口通过 `--refresh-days` 调整.
+- 只保存资产净值或合计资产净值至少一项非空的行, 不保存全空的日频记录, 不前向填充. 保留两项原始金额, 不相加或擅自把合计值视为该份额的资产净值. 官方字段表未明确金额单位和合计份额范围, 页面换算前还需核对基金原始报告.
+- 经理和资产分别提交事务; 一个接口失败不妨碍另一类资料或其他基金. 重复运行不产生重复业务记录. 不同公告日期的版本保留, 同主键变更更新, 主键缺失或冲突不补造数据.
+- `--end-date` 限制净值, 资产的净值日期及日历日期, 经理和分红获取全部返回记录; 本入口不是按历史公告时点还原的查询. 增量窗口外的修订和补录需要定期全历史复查.
+
+同一入口全历史复查净值, 资产和交易日历; 配合 `--datasets` 时仅复查所选条目:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_database --full-history
+
+# 只复查资产的全部历史
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets asset --full-history
+```
+
+全部更新结果统一记录在 `logs/database_update.log` 和 `database_update_时间戳.json`, 不再需要独立的补充更新日志. 经理或资产接口返回空表会标记 `empty`, 不能解释为该基金确实没有对应数据. 有失败时任务标记 `partial` 并返回非零退出码.
+
+参考官方文档: [基金经理](https://tushare.pro/document/2?doc_id=208), [基金净值与资产净值](https://tushare.pro/document/2?doc_id=119), [基金份额](https://tushare.pro/document/2?doc_id=207), [基金持仓](https://tushare.pro/document/2?doc_id=121).
+
+2026-10-13 实际补充结果:
+
+| 基金代码 | 名称 | 经理披露记录 | 有效资产记录 | 最新资产日期 |
+| --- | --- | --- | --- | --- |
+| 000001.OF | 华夏成长 | 19 | 101 | 2026-06-30 |
+| 005827.OF | 易方达蓝筹精选混合 | 4 | 38 | 2026-06-30 |
+| 040001.OF | 华安创新 | 12 | 102 | 2026-06-30 |
+
+任务完成, 共写入 35 条经理披露记录和 241 条有效资产记录, 忽略 13835 条两项资产全空的记录. 经理记录数不等于不同经理人数, 资产末日不等于日频净值末日或更新任务运行日期. 页面已接入经理任职资料和最新资产披露卡片.
 
 ## DuckDB 查询实现
 
 `duckdb_repository.py` 实现既有的基金列表, 区间净值和交易日历接口. 日期和代码全部参数化; 数据库金额字段保留 DECIMAL, 查询净值时转换为浮点数, 供现有服务层计算. 按净值日选择公告日期最新的版本, 主键保证同版本唯一. 每次查询打开并关闭只读连接, 不共享全局连接.
+
+新增 `get_managers(ts_code)` 和 `get_assets(ts_code)` 只读接口. 经理按姓名和任职日期区分任期, 每个任期选最新公告, 按任职日期倒序返回. 资产每个净值日期选最新公告, 按日期升序返回, 金额转浮点供展示. 不修改原有历史版本或补填缺失值. `FundService.get_details` 整理任职记录和最新资产, 两类读取错误分别返回给页面, 不影响另一类资料. CSV 对照实现明确提示未支持这两项, 不混用其他数据源.
 
 页面默认读取 `data/fund_database.duckdb`, 可用 `DATABASE_PATH` 环境变量指定其他文件. 显式设置 `NAV_CSV` 时优先使用 CSV 模式, 不会在数据库读取失败时偷偷回退 CSV. 数据库模式无需配置名单或日历 CSV.
 

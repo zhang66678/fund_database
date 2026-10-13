@@ -59,3 +59,32 @@ class DuckDBFundRepository:
     def get_calendar(self) -> pd.DataFrame:
         """返回含休市日的完整 SSE 日历, 供服务层检查缺口."""
         return self._query("SELECT cal_date, is_open FROM trade_calendar WHERE exchange = ? ORDER BY cal_date", ["SSE"])
+
+    def get_managers(self, ts_code: str) -> pd.DataFrame:
+        """保留全部任期, 同一姓名和任期仅展示最新公告记录."""
+        return self._query('''
+            WITH versions AS (
+                SELECT ann_date, name, begin_date, end_date, edu, resume,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY name, begin_date ORDER BY ann_date DESC
+                       ) AS version_rank
+                FROM fund_manager WHERE ts_code = ?
+            )
+            SELECT ann_date, name, begin_date, end_date, edu, resume
+            FROM versions WHERE version_rank = 1 ORDER BY begin_date DESC, name
+        ''', [ts_code])
+
+    def get_assets(self, ts_code: str) -> pd.DataFrame:
+        """资产金额转浮点供展示, 数据库仍保留 DECIMAL, 不补齐披露日期."""
+        return self._query('''
+            WITH versions AS (
+                SELECT ann_date, nav_date, net_asset, total_netasset,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY nav_date ORDER BY ann_date DESC
+                       ) AS version_rank
+                FROM fund_asset WHERE ts_code = ?
+            )
+            SELECT ann_date, nav_date, CAST(net_asset AS DOUBLE PRECISION) AS net_asset,
+                   CAST(total_netasset AS DOUBLE PRECISION) AS total_netasset
+            FROM versions WHERE version_rank = 1 ORDER BY nav_date
+        ''', [ts_code])

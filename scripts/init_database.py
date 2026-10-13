@@ -23,7 +23,7 @@ def main() -> None:
         else:
             logging.info("Database initialization started: %s", args.database)
             with connect(args.database) as connection:
-                # 四张表在同一事务中创建, 重复运行不会清空已有数据.
+                # 所有表在同一事务中创建, 重复运行不会清空已有数据.
                 connection.execute("BEGIN TRANSACTION")
                 initialize(connection)
                 connection.execute("COMMIT")

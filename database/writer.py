@@ -1,4 +1,4 @@
-"""批量写入四张固定业务表, 由外部事务保证整个快照的原子性."""
+"""批量写入 schema 中的业务表, 由事务保证每批数据的原子性."""
 
 from database.schema import TABLES
 
@@ -14,6 +14,11 @@ def update_targets(connection) -> list[tuple]:
 
 def calendar_last_date(connection):
     return connection.execute("SELECT max(cal_date) FROM trade_calendar WHERE exchange = ?", ["SSE"]).fetchone()[0]
+
+
+def asset_last_date(connection, code: str):
+    """资产披露频率可能低于净值, 增量更新使用资产表自己的最新日期."""
+    return connection.execute("SELECT max(nav_date) FROM fund_asset WHERE ts_code = ?", [code]).fetchone()[0]
 
 
 def write_batch(connection, frames: dict) -> dict:

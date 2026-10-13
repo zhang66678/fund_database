@@ -64,6 +64,14 @@ class CsvFundRepository:
         frame = _read_columns(self._calendar_path, ["exchange", "cal_date", "is_open"])
         return frame.loc[frame.exchange.eq("SSE"), ["cal_date", "is_open"]].copy()
 
+    def get_managers(self, ts_code: str) -> pd.DataFrame:
+        """旧 CSV 对照模式尚未提供经理资料, 不混用数据库数据."""
+        raise ValueError("CSV 对照模式暂不提供基金经理资料")
+
+    def get_assets(self, ts_code: str) -> pd.DataFrame:
+        """旧 CSV 对照模式尚未提供资产资料, 不混用数据库数据."""
+        raise ValueError("CSV 对照模式暂不提供基金资产资料")
+
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
         end_date: date | None = None,
