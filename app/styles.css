@@ -1,0 +1,107 @@
+/* 颜色和字体由原生主题管理, 此处仅补充间距和带命名 key 的卡片样式. */
+[data-testid="stMainBlockContainer"] {
+  padding: 4.5rem 2rem 2.5rem;
+}
+
+[data-testid="stHeading"] h2,
+[data-testid="stHeading"] h3 {
+  padding-top: 0.2rem;
+  padding-bottom: 0.3rem;
+}
+
+[data-testid="stCaptionContainer"] p {
+  color: #64748B;
+  line-height: 1.6;
+}
+
+.st-key-fund_search,
+.st-key-fund_overview,
+.st-key-nav_panel,
+.st-key-performance_panel,
+.st-key-manager_panel,
+.st-key-asset_panel,
+.st-key-notes_nav,
+.st-key-notes_metrics,
+.st-key-notes_details {
+  background: #FFFFFF;
+  border-color: #E2E8F0;
+  border-radius: 0.625rem;
+  padding: 1.125rem;
+  gap: 0.75rem;
+  box-shadow: 0 2px 6px rgba(31, 41, 55, 0.025);
+}
+
+.st-key-fund_search {
+  padding: 0.875rem 1.125rem;
+}
+
+[data-testid="stMetricLabel"] p {
+  color: #64748B;
+}
+
+[data-testid="stMetricValue"] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.st-key-performance_panel [data-testid="stMetric"] {
+  background: #F8FAFC;
+  border-color: #E2E8F0;
+  min-height: 6rem;
+}
+
+.st-key-asset_panel [data-testid="stMetricValue"] {
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
+}
+
+.st-key-sidebar_brand [data-testid="stMarkdownContainer"] h3,
+.st-key-sidebar_brand [data-testid="stMarkdownContainer"] h3 span {
+  color: #2563EB;
+  letter-spacing: -0.02em;
+}
+
+.st-key-sidebar_navigation [role="radiogroup"] {
+  gap: 0.375rem;
+  width: 100%;
+}
+
+.st-key-sidebar_navigation [role="radiogroup"] > div {
+  width: 100%;
+}
+
+.st-key-sidebar_navigation [role="radiogroup"] label {
+  width: 100%;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.st-key-sidebar_navigation [role="radiogroup"] label:has(input:checked) {
+  color: #2563EB;
+  background: #EFF6FF;
+}
+
+/* 卡片随可用空间换行, 资产金额保持原始格式且不截断. */
+@media (max-width: 1100px) {
+  .st-key-performance_panel [data-testid="stHorizontalBlock"],
+  .st-key-details_row [data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap;
+  }
+
+  .st-key-performance_panel [data-testid="stColumn"] {
+    flex: 1 1 calc(50% - 0.5rem);
+    width: calc(50% - 0.5rem);
+    min-width: 0;
+  }
+
+  .st-key-details_row [data-testid="stColumn"] {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  [data-testid="stMainBlockContainer"] {
+    padding: 4.5rem 1rem 2rem;
+  }
+}

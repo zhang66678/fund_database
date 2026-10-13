@@ -1,7 +1,6 @@
-"""通过页面交互验证查询链路, 使用临时数据且不访问网络."""
+"""用本地临时数据验证布局重构后的查询, 筛选和会话状态."""
 
 import json
-import os
 from datetime import date
 from pathlib import Path
 
@@ -9,121 +8,145 @@ import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from app.components import range_dates
+from database.connection import connect
+from database.schema import initialize
+
 
 @pytest.fixture
 def page(tmp_path, monkeypatch):
-    path = tmp_path / "nav.csv"
-    pd.DataFrame({
-        "ts_code": ["000001.OF"] * 3,
-        "ann_date": ["20200102", "20200103", "20200104"],
-        "nav_date": ["20200101", "20200102", "20200103"],
-        "unit_nav": [1.0, 1.1, 1.2], "accum_nav": [1.1, 1.2, 1.3],
-        "adj_nav": [1.2, None, 1.4],
-    }).to_csv(path, index=False)
-    monkeypatch.setenv("NAV_CSV", str(path))
-    names_path = tmp_path / "names.csv"
-    pd.DataFrame({"ts_code": ["000001.OF", "999999.OF"], "name": ["测试基金", "未下载基金"]}).to_csv(names_path, index=False)
-    monkeypatch.setenv("FUND_NAMES_CSV", str(names_path))
+    path = tmp_path / "page.duckdb"
+    with connect(path) as db:
+        initialize(db)
+        db.executemany("INSERT INTO fund_basic(ts_code,name,found_date) VALUES (?,?,?)", [
+            ("000001.OF", "样本甲", "2019-01-01"), ("000002.OF", "样本乙", "2020-01-01")])
+        rows = []
+        for code, year in (("000001.OF", 2020), ("000002.OF", 2021)):
+            for day, unit, accum, adj in ((1, 1, 1.1, 1.2), (2, 1.1, 1.2, None), (3, 1.2, 1.3, 1.4)):
+                rows.append((code, date(year, 1, day), date(year, 1, day), unit, accum, adj))
+        db.executemany("INSERT INTO fund_nav(ts_code,nav_date,ann_date,unit_nav,accum_nav,adj_nav) VALUES (?,?,?,?,?,?)", rows)
+        days = pd.date_range("2020-01-01", "2021-01-03")
+        open_days = {row[1] for row in rows}
+        db.executemany("INSERT INTO trade_calendar VALUES ('SSE',?,?)",
+                       [(d.date(), int(d.date() in open_days)) for d in days])
+        db.execute("INSERT INTO fund_manager(ts_code,name,begin_date,ann_date,edu,resume) VALUES "
+                   "('000001.OF','经理甲','2019-01-01','2019-01-02','硕士','测试简历')")
+        db.execute("INSERT INTO fund_asset VALUES ('000001.OF','2020-07-01','2020-06-30',1234.5,NULL)")
+    monkeypatch.delenv("NAV_CSV", raising=False)
+    monkeypatch.setenv("DATABASE_PATH", str(path))
     app = Path(__file__).resolve().parents[1] / "app/streamlit_app.py"
-    return AppTest.from_file(str(app), default_timeout=15).run()
+    return AppTest.from_file(str(app), default_timeout=15).run(), path
 
 
-def test_fund_selection_fills_code_but_allows_manual_query(page):
-    selector = page.selectbox(key="fund_choice")
-    assert selector.options == ["000001.OF  测试基金"]
-    selector.select("000001.OF").run()
-    assert page.text_input(key="fund_code").value == "000001.OF"
-    page.button[0].click().run()
-    assert not page.exception
-    assert len(page.get("plotly_chart")) == 1
-    page.text_input(key="fund_code").set_value("999999").run()
-    page.button[0].click().run()
-    assert not page.exception
-    assert page.text_input(key="fund_code").value == "999999"
-    assert len(page.info) == 1
+def traces(app):
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 1
+    return json.loads(app.get("plotly_chart")[0].proto.spec)["data"]
 
 
-def test_query_draws_selected_series_without_table(page):
-    set_date(page, "start_date", date(2020, 1, 2))
-    set_date(page, "end_date", date(2020, 1, 3))
-    page.checkbox(key="accum_nav").uncheck()
-    page.button[0].click().run()
-    assert not page.exception
-    assert not page.error
-    assert len(page.get("plotly_chart")) == 1
-    traces = json.loads(page.get("plotly_chart")[0].proto.spec)["data"]
-    assert [trace["name"] for trace in traces] == ["单位净值", "复权单位净值"]
-    assert all(trace["connectgaps"] is False for trace in traces)
-    assert len(traces[0]["x"]) == 2
-    assert not page.dataframe
+def test_search_pending_changes_and_navigation_preserve_results(page):
+    app, _ = page
+    assert traces(app) == []
+    app.button(key="submit_query").click().run()
+    first = traces(app)
+    app.text_input(key="fund_code").set_value("000002").run()
+    assert app.selectbox(key="fund_choice").value == "000002.OF"
+    app.segmented_control(key="time_range").select("全部").run()
+    assert app.text_input(key="fund_code").value == "000002"
+    assert app.session_state["query_result"]["code"] == "000001.OF"
+    assert traces(app) == first
+    assert any("条件已修改" in item.value for item in app.info)
+    app.radio(key="workspace_page").set_value("数据说明").run()
+    app.radio(key="workspace_page").set_value("基金分析").run()
+    assert app.text_input(key="fund_code").value == "000002"
+    assert app.segmented_control(key="time_range").value == "全部"
+    assert traces(app) == first
+    app.button(key="submit_query").click().run()
+    assert not app.exception
+    assert app.session_state["query_result"]["code"] == "000002.OF"
 
 
-def set_date(page, key, value):
-    for part in ("year", "month", "day"):
-        page.selectbox(key=f"{key}_{part}").select(getattr(value, part)).run()
+def test_custom_dates_curves_overview_and_detail_columns(page):
+    app, _ = page
+    app.segmented_control(key="time_range").select("自定义").run()
+    assert app.date_input(key="custom_start").proto.min == "2020-01-01"
+    assert app.date_input(key="custom_end").proto.max == "2020-01-03"
+    app.date_input(key="custom_start").set_value(date(2020, 1, 2)).run()
+    app.date_input(key="custom_end").set_value(date(2020, 1, 3)).run()
+    app.multiselect(key="nav_types").set_value(["unit_nav", "accum_nav", "adj_nav"]).run()
+    app.button(key="submit_query").click().run()
+    assert [t["name"] for t in traces(app)] == ["单位净值", "累计净值", "复权单位净值"]
+    assert [t["line"]["color"] for t in traces(app)] == ["#2563EB", "#0D9488", "#7C3AED"]
+    assert all(t["connectgaps"] is False and len(t["x"]) == 2 for t in traces(app))
+    assert app.session_state["query_result"]["start"] == date(2020, 1, 2)
+    assert pd.isna(app.session_state["query_result"]["nav"].adj_nav.iloc[0])
+    app.multiselect(key="nav_types").set_value(["adj_nav"]).run()
+    app.button(key="submit_query").click().run()
+    assert len(traces(app)) == 1
+    assert traces(app)[0]["line"]["color"] == "#7C3AED"
+    assert next(m.value for m in app.metric if m.label == "区间末日单位净值") == "1.2000"
+    assert next(m.value for m in app.metric if m.label == "区间末日累计净值") == "1.3000"
+    assert next(m.value for m in app.metric if m.label == "资产净值") == "1,234.50"
+    assert next(m.value for m in app.metric if m.label == "合计资产净值") == "未提供"
+    assert any("离任日期未提供不代表仍在任职" in c.value for c in app.caption)
+    positions = {}
+    def visit(node, path=()):
+        for i, child in getattr(node, "children", {}).items():
+            here = (*path, i)
+            if child.type == "subheader" and child.value in ("基金经理", "资产信息"):
+                positions[child.value] = here
+            if child.type == "date_input":
+                positions["date"] = here
+            if child.type == "plotly_chart":
+                positions["chart"] = here
+            visit(child, here)
+    visit(app.main)
+    assert positions["date"] < positions["chart"]
+    assert positions["基金经理"][0] == positions["资产信息"][0]
+    assert not app.dataframe
 
 
-def test_date_range_extends_from_1900_to_today(page):
-    for key in ("start_date", "end_date"):
-        assert page.selectbox(key=f"{key}_year").options == [str(y) for y in range(1900, date.today().year + 1)]
-    set_date(page, "start_date", date(1900, 1, 1))
-    set_date(page, "end_date", date.today())
-    page.button[0].click().run()
-    assert not page.exception
-    assert not page.error
-    assert page.selectbox(key="start_date_year").value == 1900
-    assert page.selectbox(key="end_date_month").options[-1] == str(date.today().month)
-    assert page.selectbox(key="end_date_day").options[-1] == str(date.today().day)
+def test_invalid_conditions_empty_data_and_storage_failure_keep_empty_chart(page, monkeypatch, tmp_path):
+    app, _ = page
+    app.multiselect(key="nav_types").set_value([]).run()
+    app.button(key="submit_query").click().run()
+    assert app.error and traces(app) == []
+    app.multiselect(key="nav_types").set_value(["unit_nav"]).run()
+    app.segmented_control(key="time_range").select("自定义").run()
+    app.date_input(key="custom_start").set_value(date(2020, 1, 3)).run()
+    app.date_input(key="custom_end").set_value(date(2020, 1, 1)).run()
+    app.button(key="submit_query").click().run()
+    assert any("开始日期不能晚于结束日期" in e.value for e in app.error)
+    assert traces(app) == []
+    app.text_input(key="fund_code").set_value("999999").run()
+    app.button(key="submit_query").click().run()
+    assert not app.error and traces(app) == []
+    assert any("净值数据" in item.value for item in app.info)
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "missing.duckdb"))
+    app.button(key="submit_query").click().run()
+    assert app.error and traces(app) == []
 
 
-def test_leap_day_and_short_month_are_adjusted(page):
-    set_date(page, "start_date", date(2020, 2, 29))
-    page.selectbox(key="start_date_year").select(2021).run()
-    assert not page.exception
-    assert page.selectbox(key="start_date_day").value == 28
-    set_date(page, "start_date", date(2021, 1, 31))
-    page.selectbox(key="start_date_month").select(4).run()
-    assert not page.exception
-    assert page.selectbox(key="start_date_day").value == 30
+def test_metrics_do_not_depend_on_curve_selection(page):
+    app, path = page
+    with connect(path) as db:
+        db.execute("UPDATE fund_nav SET adj_nav=unit_nav WHERE ts_code='000001.OF'")
+    app.button(key="submit_query").click().run()
+    metrics = app.session_state["query_result"]["metrics"]
+    assert metrics["metrics"]["max_drawdown"] == 0
+    assert len(metrics["metrics"]) == 7
+    app.multiselect(key="nav_types").set_value(["adj_nav", "accum_nav"]).run()
+    app.button(key="submit_query").click().run()
+    assert app.session_state["query_result"]["metrics"] == metrics
+    assert any("该区间不足一年" in w.value for w in app.warning)
+    assert not app.exception
 
 
-def test_empty_selection_and_unknown_fund_show_messages(page):
-    for checkbox in page.checkbox:
-        checkbox.uncheck()
-    page.button[0].click().run()
-    assert not page.exception
-    assert len(page.error) == 1
-    assert not page.get("plotly_chart")
-    page.checkbox(key="unit_nav").check()
-    page.text_input[0].set_value("999999")
-    page.button[0].click().run()
-    assert not page.exception
-    assert len(page.info) == 1
-    assert not page.dataframe
-
-
-def test_missing_file_shows_error(page, monkeypatch, tmp_path):
-    monkeypatch.setenv("NAV_CSV", str(tmp_path / "missing.csv"))
-    page.button[0].click().run()
-    assert not page.exception
-    assert len(page.error) == 1
-
-
-def test_metrics_do_not_depend_on_visible_nav_types(page, tmp_path, monkeypatch):
-    nav_path = Path(os.environ["NAV_CSV"])
-    nav = pd.read_csv(nav_path)
-    nav["adj_nav"] = [1.2, 1.3, 1.4]
-    nav.to_csv(nav_path, index=False)
-    calendar_path = tmp_path / "trade_cal.csv"
-    pd.DataFrame({"exchange": ["SSE"] * 3, "cal_date": ["20200101", "20200102", "20200103"],
-                  "is_open": [1, 1, 1]}).to_csv(calendar_path, index=False)
-    monkeypatch.setenv("CALENDAR_CSV", str(calendar_path))
-    page.button[0].click().run()
-    assert not page.exception and not page.error
-    assert len(page.metric) == 7
-    assert next(m.value for m in page.metric if m.label == "最大回撤") == "0.00%"
-    before = [m.value for m in page.metric]
-    page.checkbox(key="adj_nav").uncheck()
-    page.button[0].click().run()
-    assert [m.value for m in page.metric] == before
-    assert not page.dataframe
+def test_quick_ranges_use_local_last_date_and_handle_leap_year():
+    bounds = date(2020, 6, 15), date(2024, 2, 29)
+    expected = {"近1个月": date(2024, 1, 29), "近3个月": date(2023, 11, 29),
+                "近6个月": date(2023, 8, 29), "近1年": date(2023, 2, 28),
+                "近3年": date(2021, 2, 28), "全部": bounds[0]}
+    for label, start in expected.items():
+        assert range_dates(label, bounds) == (start, bounds[1])
+    assert range_dates("近1年", (date(2024, 2, 1), bounds[1])) == (date(2024, 2, 1), bounds[1])

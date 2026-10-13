@@ -1,0 +1,23 @@
+# 使用原生主题统一视觉, 不加载远程字体.
+[theme]
+base = "light"
+primaryColor = "#2563EB"
+backgroundColor = "#F6F8FC"
+secondaryBackgroundColor = "#F1F5F9"
+textColor = "#1F2937"
+font = "Segoe UI, Microsoft YaHei, sans-serif"
+baseRadius = "0.625rem"
+buttonRadius = "0.5rem"
+borderColor = "#E2E8F0"
+showWidgetBorder = true
+showSidebarBorder = true
+headingFontSizes = ["2rem", "1.75rem", "1.125rem"]
+headingFontWeights = [600, 600, 600]
+metricValueFontSize = "1.75rem"
+metricValueFontWeight = 600
+chartCategoricalColors = ["#2563EB", "#0D9488", "#7C3AED"]
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F5F9"
+headingFontSizes = ["1.5rem", "1.25rem", "1.125rem"]
