@@ -86,6 +86,20 @@ def _show_chart(result: dict | None) -> None:
     st.plotly_chart(figure, width="stretch", theme=None, key="comparison_chart")
 
 
+def _metric_colors(row: pd.Series) -> pd.Series:
+    """按同行已显示的数值比较, 最优红色, 最差绿色, 不改变指标结果."""
+    styles = pd.Series("", index=row.index)
+    # 去掉百分号仅供颜色比较, 无法计算及同显示精度的数值不强行区分.
+    values = pd.to_numeric(row.drop("指标").str.rstrip("%"), errors="coerce")
+    if values.nunique() < 2:
+        return styles
+    lower_is_better = row["指标"] in {"年化波动", "年化下行风险", "最大回撤"}
+    best, worst = (values.min(), values.max()) if lower_is_better else (values.max(), values.min())
+    styles.loc[values.index[values.eq(best)]] = "color: #DC2626"
+    styles.loc[values.index[values.eq(worst)]] = "color: #15803D"
+    return styles
+
+
 def _show_performance(result: dict | None) -> None:
     with st.container(border=True, key="comparison_performance"):
         st.subheader("绩效对照")
@@ -101,9 +115,11 @@ def _show_performance(result: dict | None) -> None:
                 for key, (_, fmt) in METRICS.items()
             ]
         st.dataframe(
-            pd.DataFrame(table), hide_index=True, width="stretch", height="auto",
+            pd.DataFrame(table).style.apply(_metric_colors, axis=1),
+            hide_index=True, width="stretch", height="auto",
             column_config={"指标": st.column_config.TextColumn("指标", pinned=True, width="small")},
         )
+        st.caption("同行最优值为红色, 最差值为绿色; 中间值, 全部相同或无法计算时保持原色. 收益和比率越高越优, 波动, 下行风险及最大回撤越低越优.")
         if len(result["funds"]) > 2:
             st.caption("基金较多时, 可在表格内横向滚动查看完整指标.")
         for code, error in result["errors"].items():
