@@ -4,11 +4,13 @@ from datetime import date
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 
 NAV_LABELS = {"unit_nav": "单位净值", "accum_nav": "累计净值", "adj_nav": "复权单位净值"}
 NAV_COLORS = {"unit_nav": "#2563EB", "accum_nav": "#0D9488", "adj_nav": "#7C3AED"}
+CHART_LABELS = {**NAV_LABELS, "cumulative_return": "累计收益率", "drawdown": "回撤"}
 RANGES = ("近1个月", "近3个月", "近6个月", "近1年", "近3年", "全部", "自定义")
 METRICS = {
     "annual_return": ("年化收益", ".2%"), "annual_volatility": ("年化波动", ".2%"),
@@ -130,8 +132,9 @@ def show_filters(bounds: tuple[date, date] | None) -> tuple[dict, bool]:
         st.session_state.nav_types = draft["selected"]
     curve_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
     selected = curve_col.multiselect(
-        "净值曲线", options=list(NAV_LABELS), format_func=NAV_LABELS.get, key="nav_types",
-        on_change=remember_query, args=("selected", "nav_types"), help="允许选择多条曲线, 数值保留原始口径",
+        "图表曲线", options=list(CHART_LABELS), format_func=CHART_LABELS.get, key="nav_types",
+        on_change=remember_query, args=("selected", "nav_types"),
+        help="净值使用左轴, 累计收益率使用右轴, 回撤展示在下方. 收益和回撤基于复权净值.",
     )
     submitted = button_col.button("查询", key="submit_query", type="primary", width="stretch")
     return {**conditions, "selected": list(selected)}, submitted
@@ -169,7 +172,14 @@ def show_overview(result: dict | None) -> None:
 
 
 def show_chart(result: dict | None) -> None:
-    figure = go.Figure()
+    selected = [] if result is None else result["selected"]
+    has_drawdown = result is None or "drawdown" in selected
+    # 主图左轴放净值, 右轴放收益; 下方回撤区与主图联动日期缩放.
+    figure = make_subplots(
+        rows=2 if has_drawdown else 1, cols=1, shared_xaxes=True,
+        specs=[[{"secondary_y": True}], [{}]] if has_drawdown else [[{"secondary_y": True}]],
+        row_heights=[0.74, 0.26] if has_drawdown else [1], vertical_spacing=0.09,
+    )
     if result is None or result["nav"].empty:
         figure.add_annotation(
             text="选择基金和时间范围后点击查询" if result is None else "该区间暂无净值数据",
@@ -178,14 +188,57 @@ def show_chart(result: dict | None) -> None:
         )
     else:
         nav = result["nav"]
-        for field in result["selected"]:
+        for field in selected:
+            if field not in NAV_LABELS:
+                continue
             figure.add_trace(go.Scatter(
                 x=nav.nav_date, y=nav[field], name=NAV_LABELS[field], mode="lines", connectgaps=False,
                 line=dict(color=NAV_COLORS[field], width=2),
                 hovertemplate="%{y:.4f}<extra>%{fullData.name}</extra>",
-            ))
+            ), row=1, col=1, secondary_y=False)
+        series = result.get("performance_series")
+        if series is not None and not series.empty:
+            if "cumulative_return" in selected:
+                figure.add_trace(go.Scatter(
+                    x=series.nav_date, y=series.cumulative_return, name="累计收益率",
+                    mode="lines+markers" if series.cumulative_return.isna().any() else "lines", marker=dict(size=4),
+                    connectgaps=False, line=dict(color="#D97706", width=2, dash="dash"),
+                    hovertemplate="%{y:.2%}<extra>%{fullData.name}</extra>",
+                ), row=1, col=1, secondary_y=True)
+            if has_drawdown:
+                figure.add_trace(go.Scatter(
+                    x=series.nav_date, y=series.drawdown, name="回撤",
+                    mode="lines+markers" if series.drawdown.isna().any() else "lines", marker=dict(size=4),
+                    connectgaps=False, line=dict(color="#DC5967", width=1.5),
+                    fill="tozeroy", fillcolor="rgba(220, 89, 103, 0.14)",
+                    hovertemplate="%{y:.2%}<extra>%{fullData.name}</extra>",
+                ), row=2, col=1)
+            if series.iloc[:, 1:].isna().any().any():
+                st.caption("收益与回撤存在缺失开市日, 已保留断点; 回撤仅按区间内已观测净值峰值计算.")
+        elif result.get("series_error"):
+            st.warning(f"收益与回撤曲线暂不可绘制: {result['series_error']}")
         st.caption(f"当前展示: {result['name']} · {result['code']} | {result['start']} 至 {result['end']}")
     style_chart(figure)
+    figure.update_layout(height=560 if has_drawdown else 440)
+    figure.update_xaxes(type="date", title_text=None)
+    # 日期轴放在主图和回撤区之间, 回撤从日期轴下方的 0% 线向下展开.
+    figure.update_xaxes(title_text="日期", title_standoff=4, showticklabels=True, row=1, col=1)
+    if has_drawdown:
+        figure.update_xaxes(showticklabels=False, row=2, col=1)
+    figure.update_yaxes(title_text="净值", tickformat=".4f", row=1, col=1, secondary_y=False)
+    figure.update_yaxes(
+        title_text="累计收益率", tickformat=".2%", showgrid=False,
+        visible="cumulative_return" in selected, title_font_color="#D97706", tickfont_color="#D97706",
+        row=1, col=1, secondary_y=True,
+    )
+    if has_drawdown:
+        figure.update_yaxes(
+            title_text="回撤", tickformat=".2%", rangemode="tozero", zeroline=True,
+            zerolinecolor="#CBD5E1", title_font_color="#DC5967", autorangeoptions=dict(maxallowed=0),
+            row=2, col=1,
+        )
+    if any(field in selected for field in ("cumulative_return", "drawdown")):
+        st.caption("累计收益以区间首个有效开市日复权净值为 0%; 回撤从区间内已观测峰值向下绘制, 与最大回撤卡片的正值口径方向相反.")
     st.plotly_chart(figure, width="stretch", theme=None, key="nav_chart")
 
 
@@ -292,6 +345,7 @@ def show_data_notes() -> None:
         st.subheader("数据范围与净值")
         st.write("页面读取本地已下载数据, 不提供实时行情, 不自动请求 Tushare. 快捷区间以所选基金的本地最新净值日为基准, 全部范围取实际数据起止日.")
         st.write("单位净值, 累计净值和复权单位净值直接使用来源数据. 多条曲线保留原始量级, 缺失值保持断点, 不插值或归一化.")
+        st.write("单基金图上方左轴为原始净值, 右轴为区间累计收益率, 下方为回撤. 收益采用区间首个开市日复权净值为基期; 回撤相对所选区间内已观测峰值, 不含区间前历史峰值, 以负百分比展示. 两条派生曲线使用 SSE 开市日, 不填充缺失记录.")
         st.write("概览中的成立日期, 投资类型和业绩比较基准来自本地当前基金档案, 不按净值区间还原历史资料或历史基准.")
         st.write("基金对比使用共同开市日的复权净值计算累计收益, 从相同起点的 0% 开始. 原始净值不修改, 中间缺失保留断点, 实际比较区间以结果标注为准.")
     with st.container(border=True, key="notes_metrics"):

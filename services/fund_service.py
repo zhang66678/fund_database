@@ -24,8 +24,8 @@ def _normalize_code(ts_code: str) -> str:
     return code
 
 
-def _comparison_prices(navs: dict[str, pd.DataFrame], calendar: pd.DataFrame) -> pd.DataFrame:
-    """在共同覆盖范围内按 SSE 开市日对齐, 保留中间缺口, 不填充净值."""
+def _aligned_prices(navs: dict[str, pd.DataFrame], calendar: pd.DataFrame) -> pd.DataFrame:
+    """单基金及多基金共用 SSE 开市日对齐, 保留中间缺口, 不填充净值."""
     first = max(nav.nav_date.min() for nav in navs.values())
     last = min(nav.nav_date.max() for nav in navs.values())
     if first > last:
@@ -71,6 +71,24 @@ class FundService:
         nav = self.get_nav(ts_code, start_date, end_date, ["adj_nav"])
         return calculate_metrics(nav, self._repository.get_calendar())
 
+    def get_performance_series(
+        self, ts_code: str, start_date: date | None = None, end_date: date | None = None,
+    ) -> pd.DataFrame:
+        """返回区间累计收益和负值回撤, 基于复权净值, 缺失开市日保留 NaN.
+
+        累计收益以区间首个开市日为基期. 回撤相对区间内已观测峰值,
+        与最大回撤指标的正值展示方向相反, 不引入区间之前的峰值.
+        """
+        code = _normalize_code(ts_code)
+        nav = self.get_nav(code, start_date, end_date, ["adj_nav"])
+        if nav.empty:
+            return pd.DataFrame(columns=["nav_date", "cumulative_return", "drawdown"])
+        prices = _aligned_prices({code: nav}, self._repository.get_calendar())[code]
+        return pd.DataFrame({
+            "cumulative_return": prices / prices.iloc[0] - 1,
+            "drawdown": prices / prices.cummax() - 1,
+        }).reset_index(names="nav_date")
+
     def get_comparison(
         self, ts_codes: Sequence[str], start_date: date | None = None,
         end_date: date | None = None,
@@ -93,7 +111,7 @@ class FundService:
             if nav.empty:
                 raise ValueError(f"{code}: 所选区间没有净值数据")
             navs[code] = nav
-        prices = _comparison_prices(navs, self._repository.get_calendar())
+        prices = _aligned_prices(navs, self._repository.get_calendar())
         first, last = prices.index[0].date(), prices.index[-1].date()
         cumulative = prices.div(prices.iloc[0]).sub(1).reset_index(names="nav_date")
 

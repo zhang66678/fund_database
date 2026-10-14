@@ -123,3 +123,19 @@ def test_comparison_preserves_gaps_and_rejects_incomparable_inputs():
     repo.frames["000003.OF"]["nav_date"] -= pd.DateOffset(years=1)
     with pytest.raises(ValueError, match="共同净值区间"):
         service.get_comparison(["000001", "000003"])
+
+
+def test_performance_series_returns_drawdowns_and_preserves_missing_days():
+    repo = ComparisonRepository()
+    service = FundService(repo)
+    curve = service.get_performance_series("000001", date(2020, 1, 6), date(2020, 1, 9))
+    assert curve.cumulative_return.tolist() == pytest.approx([0, 0.2, 0.08, 0.1])
+    assert curve.drawdown.tolist() == pytest.approx([0, 0, -0.1, -1 / 12])
+    metrics = service.get_metrics("000001", date(2020, 1, 6), date(2020, 1, 9))
+    assert -curve.drawdown.min() == pytest.approx(metrics["metrics"]["max_drawdown"])
+    # 非交易日的异常值不进入派生曲线; 缺失交易日保留断点, 不向前填充.
+    curve = service.get_performance_series("000001")
+    assert pd.Timestamp("2020-01-04") not in curve.nav_date.tolist()
+    repo.frames["000001.OF"] = repo.frames["000001.OF"].drop(index=3)
+    curve = service.get_performance_series("000001", date(2020, 1, 6), date(2020, 1, 9))
+    assert curve.loc[curve.nav_date.eq("2020-01-07"), ["cumulative_return", "drawdown"]].isna().all().all()

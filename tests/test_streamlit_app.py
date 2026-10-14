@@ -54,6 +54,8 @@ def test_search_pending_changes_and_navigation_preserve_results(page):
     assert app.text_input(key="fund_code").value == "000001.OF"
     app.button(key="submit_query").click().run()
     first = traces(app)
+    assert all(t["mode"] == "lines+markers" for t in first[1:])
+    assert app.session_state["query_result"]["performance_series"].iloc[1, 1:].isna().all()
     app.text_input(key="fund_code").set_value("000002").run()
     assert app.selectbox(key="fund_choice").value == "000002.OF"
     app.segmented_control(key="time_range").select("全部").run()
@@ -147,6 +149,16 @@ def test_metrics_do_not_depend_on_curve_selection(page):
     app.selectbox(key="fund_choice").select("000001.OF").run()
     app.button(key="submit_query").click().run()
     metrics = app.session_state["query_result"]["metrics"]
+    data = traces(app)
+    assert [t["name"] for t in data] == ["单位净值", "累计收益率", "回撤"]
+    assert [t["yaxis"] for t in data] == ["y", "y2", "y3"]
+    assert data[1]["line"]["dash"] == "dash" and data[2]["fill"] == "tozeroy"
+    assert all(t["connectgaps"] is False for t in data)
+    layout = json.loads(app.get("plotly_chart")[0].proto.spec)["layout"]
+    assert layout["yaxis2"]["side"] == "right" and layout["xaxis"]["matches"] == "x2"
+    assert layout["xaxis"]["showticklabels"] and not layout["xaxis2"]["showticklabels"]
+    assert layout["yaxis3"]["domain"][1] < layout["yaxis"]["domain"][0]
+    assert layout["yaxis3"]["autorangeoptions"]["maxallowed"] == 0
     assert metrics["metrics"]["max_drawdown"] == 0
     assert len(metrics["metrics"]) == 7
     app.multiselect(key="nav_types").set_value(["adj_nav", "accum_nav"]).run()

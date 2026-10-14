@@ -39,7 +39,7 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
     st.session_state.query_feedback = None
     try:
         if not conditions["selected"]:
-            raise ValueError("请至少选择一种净值")
+            raise ValueError("请至少选择一种曲线")
         if bounds_error:
             raise ValueError(bounds_error)
         if bounds is not None and conditions["range"] == "自定义" and (
@@ -56,6 +56,7 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
                 **conditions, "code": details["code"], "name": funds.get(details["code"], "名称未提供"),
                 "selected": list(conditions["selected"]), "nav": nav,
                 "details": details, "metrics": None, "metrics_error": None,
+                "performance_series": None, "series_error": None,
             }
             for dataset, error in details["errors"].items():
                 logger.warning("Fund details unavailable: %s: %s", dataset, error)
@@ -64,6 +65,12 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
                     "level": "info", "message": "本地没有该基金在所选日期内的净值数据, 请检查代码和日期范围.",
                 }
             else:
+                if any(field in conditions["selected"] for field in ("cumulative_return", "drawdown")):
+                    try:
+                        result["performance_series"] = service.get_performance_series(code, start, end)
+                    except (ValueError, OSError, UnicodeError) as exc:
+                        logger.warning("Performance series unavailable: %s", exc)
+                        result["series_error"] = str(exc)
                 try:
                     result["metrics"] = service.get_metrics(code, start, end)
                 except (ValueError, OSError, UnicodeError) as exc:
@@ -112,7 +119,7 @@ def main() -> None:
 
     if "draft_query" not in st.session_state:
         st.session_state.draft_query = {
-            "code": "", "range": "近1年", "selected": ["unit_nav"],
+            "code": "", "range": "近1年", "selected": ["unit_nav", "cumulative_return", "drawdown"],
         }
     code = show_search(funds)
     st.session_state.draft_query["code"] = code
@@ -120,7 +127,7 @@ def main() -> None:
     # 概览位置在图表前, 但内容在处理本次提交后写入, 避免显示上一轮结果.
     overview_area = st.container()
     with st.container(border=True, key="nav_panel"):
-        st.subheader("历史净值走势")
+        st.subheader("净值与收益走势")
         conditions, submitted = show_filters(bounds)
         conditions["code"] = code
         if submitted:
