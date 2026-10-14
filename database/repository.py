@@ -7,6 +7,7 @@ import pandas as pd
 
 
 NAV_COLUMNS = ["nav_date", "unit_nav", "accum_nav", "adj_nav"]
+BASIC_COLUMNS = ["found_date", "fund_type", "benchmark"]
 MANAGER_COLUMNS = ["ann_date", "name", "begin_date", "end_date", "edu", "resume"]
 ASSET_COLUMNS = ["ann_date", "nav_date", "net_asset", "total_netasset"]
 
@@ -34,6 +35,13 @@ class FundRepository(Protocol):
 
     def get_calendar(self) -> pd.DataFrame:
         """返回 SSE 日历的 cal_date, is_open 列, 供日频指标使用."""
+        ...
+
+    def get_basic(self, ts_code: str) -> pd.DataFrame:
+        """返回 BASIC_COLUMNS 中的当前基金资料, 成立日期为 pandas 日期.
+
+        无记录时返回同结构空表, 缺失字段保留, 不还原历史时点的资料.
+        """
         ...
 
     def get_managers(self, ts_code: str) -> pd.DataFrame:

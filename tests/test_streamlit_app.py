@@ -18,8 +18,9 @@ def page(tmp_path, monkeypatch):
     path = tmp_path / "page.duckdb"
     with connect(path) as db:
         initialize(db)
-        db.executemany("INSERT INTO fund_basic(ts_code,name,found_date) VALUES (?,?,?)", [
-            ("000001.OF", "样本甲", "2019-01-01"), ("000002.OF", "样本乙", "2020-01-01")])
+        db.executemany("INSERT INTO fund_basic(ts_code,name,found_date,fund_type,benchmark) VALUES (?,?,?,?,?)", [
+            ("000001.OF", "样本甲", "2019-01-01", "混合型", "测试指数收益率×80%+债券指数收益率×20%"),
+            ("000002.OF", "样本乙", "2020-01-01", None, None)])
         rows = []
         for code, year in (("000001.OF", 2020), ("000002.OF", 2021)):
             for day, unit, accum, adj in ((1, 1, 1.1, 1.2), (2, 1.1, 1.2, None), (3, 1.2, 1.3, 1.4)):
@@ -47,6 +48,10 @@ def traces(app):
 def test_search_pending_changes_and_navigation_preserve_results(page):
     app, _ = page
     assert traces(app) == []
+    assert app.selectbox(key="fund_choice").value is None
+    assert app.text_input(key="fund_code").value == ""
+    app.selectbox(key="fund_choice").select("000001.OF").run()
+    assert app.text_input(key="fund_code").value == "000001.OF"
     app.button(key="submit_query").click().run()
     first = traces(app)
     app.text_input(key="fund_code").set_value("000002").run()
@@ -64,10 +69,13 @@ def test_search_pending_changes_and_navigation_preserve_results(page):
     app.button(key="submit_query").click().run()
     assert not app.exception
     assert app.session_state["query_result"]["code"] == "000002.OF"
+    assert any(m.value == "**投资类型:** 暂无数据" for m in app.markdown)
+    assert any(m.value == "**业绩比较基准:** 暂无数据" for m in app.markdown)
 
 
 def test_custom_dates_curves_overview_and_detail_columns(page):
     app, _ = page
+    app.selectbox(key="fund_choice").select("000001.OF").run()
     app.segmented_control(key="time_range").select("自定义").run()
     assert app.date_input(key="custom_start").proto.min == "2020-01-01"
     assert app.date_input(key="custom_end").proto.max == "2020-01-03"
@@ -88,6 +96,10 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
     assert next(m.value for m in app.metric if m.label == "区间末日累计净值") == "1.3000"
     assert next(m.value for m in app.metric if m.label == "资产净值") == "1,234.50"
     assert next(m.value for m in app.metric if m.label == "合计资产净值") == "未提供"
+    assert any(m.value == "**成立日期:** 2019-01-01" for m in app.markdown)
+    assert any(m.value == "**投资类型:** 混合型" for m in app.markdown)
+    assert any(m.value == "**业绩比较基准:** 测试指数收益率×80%+债券指数收益率×20%" for m in app.markdown)
+    assert not any("**样本甲**" in m.value for m in app.markdown)
     assert any("离任日期未提供不代表仍在任职" in c.value for c in app.caption)
     positions = {}
     def visit(node, path=()):
@@ -112,6 +124,7 @@ def test_invalid_conditions_empty_data_and_storage_failure_keep_empty_chart(page
     app.button(key="submit_query").click().run()
     assert app.error and traces(app) == []
     app.multiselect(key="nav_types").set_value(["unit_nav"]).run()
+    app.selectbox(key="fund_choice").select("000001.OF").run()
     app.segmented_control(key="time_range").select("自定义").run()
     app.date_input(key="custom_start").set_value(date(2020, 1, 3)).run()
     app.date_input(key="custom_end").set_value(date(2020, 1, 1)).run()
@@ -131,6 +144,7 @@ def test_metrics_do_not_depend_on_curve_selection(page):
     app, path = page
     with connect(path) as db:
         db.execute("UPDATE fund_nav SET adj_nav=unit_nav WHERE ts_code='000001.OF'")
+    app.selectbox(key="fund_choice").select("000001.OF").run()
     app.button(key="submit_query").click().run()
     metrics = app.session_state["query_result"]["metrics"]
     assert metrics["metrics"]["max_drawdown"] == 0

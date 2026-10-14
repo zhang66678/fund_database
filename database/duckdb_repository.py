@@ -60,6 +60,12 @@ class DuckDBFundRepository:
         """返回含休市日的完整 SSE 日历, 供服务层检查缺口."""
         return self._query("SELECT cal_date, is_open FROM trade_calendar WHERE exchange = ? ORDER BY cal_date", ["SSE"])
 
+    def get_basic(self, ts_code: str) -> pd.DataFrame:
+        """读取已经入库的基础资料, 不随净值查询区间回溯."""
+        return self._query(
+            "SELECT found_date, fund_type, benchmark FROM fund_basic WHERE ts_code = ?", [ts_code],
+        )
+
     def get_managers(self, ts_code: str) -> pd.DataFrame:
         """保留全部任期, 同一姓名和任期仅展示最新公告记录."""
         return self._query('''

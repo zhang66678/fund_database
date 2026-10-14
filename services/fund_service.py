@@ -36,10 +36,11 @@ class FundService:
         return calculate_metrics(nav, self._repository.get_calendar())
 
     def get_details(self, ts_code: str) -> dict:
-        """提供经理任职记录及最新资产披露, 一类资料失败不影响另一类."""
+        """提供基础资料, 经理任职及最新资产披露, 各类读取互不影响."""
         code = _normalize_code(ts_code)
-        result = {"code": code, "managers": [], "asset": None, "errors": {}}
-        for key, query in (("managers", self._repository.get_managers), ("asset", self._repository.get_assets)):
+        result = {"code": code, "basic": None, "managers": [], "asset": None, "errors": {}}
+        for key, query in (("basic", self._repository.get_basic),
+                           ("managers", self._repository.get_managers), ("asset", self._repository.get_assets)):
             try:
                 frame = query(code)
                 result[key] = frame.to_dict("records") if key == "managers" else (

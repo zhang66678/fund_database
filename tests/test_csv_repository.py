@@ -24,7 +24,16 @@ def nav_path(tmp_path):
 
 
 def test_range_latest_version_and_nulls(nav_path):
-    repo = CsvFundRepository(nav_path)
+    names_path = nav_path.with_name("fund_basic.csv")
+    pd.DataFrame([{
+        "ts_code": "000001.OF", "name": "样本甲", "found_date": "20190101",
+        "fund_type": "混合型", "benchmark": "测试指数收益率",
+    }]).to_csv(names_path, index=False)
+    repo = CsvFundRepository(nav_path, names_path=names_path)
+    basic = repo.get_basic("000001.OF").iloc[0]
+    assert basic.found_date == pd.Timestamp("2019-01-01")
+    assert basic.fund_type == "混合型" and basic.benchmark == "测试指数收益率"
+    assert repo.get_basic("999999.OF").empty
     result = repo.get_nav("000001.OF", date(2020, 1, 2), date(2020, 1, 2))
     assert result.unit_nav.tolist() == [1.2]
     assert result.adj_nav.isna().all()

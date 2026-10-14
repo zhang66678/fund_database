@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from database.repository import NAV_COLUMNS
+from database.repository import BASIC_COLUMNS, NAV_COLUMNS
 
 
 def _read_columns(path: Path, columns: list[str]) -> pd.DataFrame:
@@ -67,6 +67,15 @@ class CsvFundRepository:
     def get_managers(self, ts_code: str) -> pd.DataFrame:
         """旧 CSV 对照模式尚未提供经理资料, 不混用数据库数据."""
         raise ValueError("CSV 对照模式暂不提供基金经理资料")
+
+    def get_basic(self, ts_code: str) -> pd.DataFrame:
+        """从同一份基金名单读取资料, 旧名单没有的字段保持缺失."""
+        if self._names_path is None:
+            return pd.DataFrame(columns=BASIC_COLUMNS)
+        frame = pd.read_csv(self._names_path, dtype="string", encoding="utf-8-sig")
+        basic = frame.loc[frame.ts_code.eq(ts_code)].reindex(columns=BASIC_COLUMNS).copy()
+        basic["found_date"] = _parse_date(basic.found_date.astype("string"), required=False)
+        return basic.reset_index(drop=True)
 
     def get_assets(self, ts_code: str) -> pd.DataFrame:
         """旧 CSV 对照模式尚未提供资产资料, 不混用数据库数据."""

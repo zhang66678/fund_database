@@ -106,7 +106,7 @@ def main() -> None:
 
     if "draft_query" not in st.session_state:
         st.session_state.draft_query = {
-            "code": next(iter(funds), ""), "range": "近1年", "selected": ["unit_nav"],
+            "code": "", "range": "近1年", "selected": ["unit_nav"],
         }
     code = show_search(funds)
     st.session_state.draft_query["code"] = code

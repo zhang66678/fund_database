@@ -69,7 +69,7 @@ def show_search(funds: dict) -> str:
             on_change=_choose_fund, disabled=not funds,
         )
         code = code_col.text_input(
-            "基金代码", key="fund_code", placeholder="例如 000001",
+            "基金代码", key="fund_code", placeholder="输入基金代码",
             on_change=_edit_code, args=(funds,), help="保留手动查询, 最终以此处代码为准",
         )
     return code
@@ -135,15 +135,23 @@ def show_overview(result: dict | None) -> None:
         st.subheader("基金概览")
         latest = None
         if result is None:
-            st.caption("提交查询后展示基金身份和查询区间末日净值.")
+            st.caption("提交查询后展示基金资料和查询区间末日净值.")
         else:
-            st.markdown(f"**{result['name']}** · {result['code']}")
             if not result["nav"].empty:
                 latest = result["nav"].iloc[-1]
             if result["start"] is not None:
                 st.caption(f"对应净值日期: {_date_text(None if latest is None else latest.nav_date)} | 已提交区间: {result['start']} 至 {result['end']}")
             else:
                 st.caption("暂无可确定的净值区间.")
+        details = {} if result is None else result["details"]
+        basic = details.get("basic") or {}
+        if "basic" in details.get("errors", {}):
+            st.warning(f"基础资料暂不可用: {details['errors']['basic']}")
+        date_col, type_col = st.columns(2)
+        date_col.markdown(f"**成立日期:** {_date_text(basic.get('found_date'))}")
+        fund_type, benchmark = basic.get("fund_type"), basic.get("benchmark")
+        type_col.markdown(f"**投资类型:** {'暂无数据' if pd.isna(fund_type) else fund_type}")
+        st.markdown(f"**业绩比较基准:** {'暂无数据' if pd.isna(benchmark) else benchmark}")
         for column, field in zip(st.columns(2), ("unit_nav", "accum_nav")):
             value = None if latest is None else latest[field]
             column.metric("区间末日" + NAV_LABELS[field], "暂无数据" if pd.isna(value) else f"{value:.4f}")
@@ -268,6 +276,7 @@ def show_data_notes() -> None:
         st.subheader("数据范围与净值")
         st.write("页面读取本地已下载数据, 不提供实时行情, 不自动请求 Tushare. 快捷区间以所选基金的本地最新净值日为基准, 全部范围取实际数据起止日.")
         st.write("单位净值, 累计净值和复权单位净值直接使用来源数据. 多条曲线保留原始量级, 缺失值保持断点, 不插值或归一化.")
+        st.write("概览中的成立日期, 投资类型和业绩比较基准来自本地当前基金档案, 不按净值区间还原历史资料或历史基准.")
     with st.container(border=True, key="notes_metrics"):
         st.subheader("绩效指标")
         st.write("七项指标均通过现有服务按交易日复权净值计算, 不随所选曲线类型变化. 实际计算区间, 样本数, 年化系数, 无风险利率和目标收益率以查询结果中的计算口径为准.")
