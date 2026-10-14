@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from app.bootstrap import create_service
+from app.comparison_page import show_comparison_page
 from app.components import (
     choice_code, show_chart, show_data_notes, show_details, show_filters,
     show_navigation, show_overview, show_performance, show_search,
@@ -88,10 +89,15 @@ def _has_pending_changes(result: dict, conditions: dict) -> bool:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Fund Analytics | 基金分析", layout="wide", initial_sidebar_state="expanded")
+    page_title = st.session_state.get("workspace_page", "基金分析")
+    st.set_page_config(page_title=f"Fund Analytics | {page_title}", layout="wide", initial_sidebar_state="expanded")
     st.html(Path(__file__).with_name("styles.css"))
-    if show_navigation() == "数据说明":
+    page = show_navigation()
+    if page == "数据说明":
         show_data_notes()
+        return
+    if page == "基金对比":
+        show_comparison_page()
         return
 
     st.header("基金分析")

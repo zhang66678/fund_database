@@ -24,19 +24,19 @@ def choice_code(value: str) -> str:
     return value + ".OF" if len(value) == 6 and value.isdigit() else value
 
 
-def _remember(field: str, key: str) -> None:
+def remember_query(field: str, key: str, draft_key: str = "draft_query") -> None:
     # 编辑条件独立于控件 key 保存, 切换导航后不会被控件清理机制丢弃.
-    st.session_state.draft_query[field] = st.session_state[key]
+    st.session_state[draft_key][field] = st.session_state[key]
 
 
 def _choose_fund() -> None:
     if st.session_state.fund_choice is not None:
         st.session_state.fund_code = st.session_state.fund_choice
-        _remember("code", "fund_code")
+        remember_query("code", "fund_code")
 
 
 def _edit_code(funds: dict) -> None:
-    _remember("code", "fund_code")
+    remember_query("code", "fund_code")
     code = choice_code(st.session_state.fund_code)
     # 修改选择框不会触发其 on_change, 不会把手动输入反向覆盖.
     st.session_state.fund_choice = code if code in funds else None
@@ -48,7 +48,7 @@ def show_navigation() -> str:
             st.markdown("### Fund Analytics")
             st.caption("基金研究与分析")
         with st.container(key="sidebar_navigation"):
-            page = st.radio("导航", ("基金分析", "数据说明"), key="workspace_page", label_visibility="collapsed")
+            page = st.radio("导航", ("基金分析", "基金对比", "数据说明"), key="workspace_page", label_visibility="collapsed")
         st.divider()
         st.caption("本地历史数据查询, 不自动下载新数据.")
     return page
@@ -84,19 +84,24 @@ def range_dates(label: str, bounds: tuple[date, date]) -> tuple[date, date]:
     return max(first, (pd.Timestamp(last) - pd.DateOffset(months=months)).date()), last
 
 
-def show_filters(bounds: tuple[date, date] | None) -> tuple[dict, bool]:
-    draft = st.session_state.draft_query
-    if "time_range" not in st.session_state:
-        st.session_state.time_range = draft["range"]
+def show_date_filters(
+    bounds: tuple[date, date] | None, *, draft_key: str = "draft_query", prefix: str = "",
+) -> dict:
+    """复用日期布局, 不同页面通过前缀和独立草稿保存各自条件."""
+    draft = st.session_state[draft_key]
+    range_key = prefix + "time_range"
+    if range_key not in st.session_state:
+        st.session_state[range_key] = draft["range"]
     label = st.segmented_control(
-        "时间范围", RANGES, key="time_range", required=True, disabled=bounds is None, wrap=True,
-        on_change=_remember, args=("range", "time_range"),
+        "时间范围", RANGES, key=range_key, required=True, disabled=bounds is None, wrap=True,
+        on_change=remember_query, args=("range", range_key, draft_key),
     )
     start, end = None, None
     if bounds is not None:
         if label == "自定义":
             defaults = range_dates("近1年", bounds)
-            for column, key, title, default in zip(st.columns(2), ("custom_start", "custom_end"), ("开始日期", "结束日期"), defaults):
+            keys = (prefix + "custom_start", prefix + "custom_end")
+            for column, key, title, default in zip(st.columns(2), keys, ("开始日期", "结束日期"), defaults):
                 draft.setdefault(key, default)
                 if key not in st.session_state:
                     st.session_state[key] = draft[key]
@@ -107,23 +112,29 @@ def show_filters(bounds: tuple[date, date] | None) -> tuple[dict, bool]:
                     draft[key] = st.session_state[key]
                 column.date_input(
                     title, value=None, min_value=bounds[0], max_value=bounds[1], key=key,
-                    format="YYYY-MM-DD", on_change=_remember, args=(key, key),
+                    format="YYYY-MM-DD", on_change=remember_query, args=(key, key, draft_key),
                 )
-            start, end = st.session_state.custom_start, st.session_state.custom_end
+            start, end = (st.session_state[key] for key in keys)
         else:
             start, end = range_dates(label, bounds)
         st.caption(f"本地净值范围: {bounds[0]} 至 {bounds[1]}. 快捷区间以末日为基准, 含两端.")
     else:
-        st.caption("尚未取得该基金的本地净值范围.")
+        st.caption("选择基金后确定可查询的本地净值范围.")
+    return {"range": label, "start": start, "end": end}
+
+
+def show_filters(bounds: tuple[date, date] | None) -> tuple[dict, bool]:
+    draft = st.session_state.draft_query
+    conditions = show_date_filters(bounds)
     if "nav_types" not in st.session_state:
         st.session_state.nav_types = draft["selected"]
     curve_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
     selected = curve_col.multiselect(
         "净值曲线", options=list(NAV_LABELS), format_func=NAV_LABELS.get, key="nav_types",
-        on_change=_remember, args=("selected", "nav_types"), help="允许选择多条曲线, 数值保留原始口径",
+        on_change=remember_query, args=("selected", "nav_types"), help="允许选择多条曲线, 数值保留原始口径",
     )
     submitted = button_col.button("查询", key="submit_query", type="primary", width="stretch")
-    return {"range": label, "start": start, "end": end, "selected": list(selected)}, submitted
+    return {**conditions, "selected": list(selected)}, submitted
 
 
 def _date_text(value) -> str:
@@ -174,12 +185,18 @@ def show_chart(result: dict | None) -> None:
                 hovertemplate="%{y:.4f}<extra>%{fullData.name}</extra>",
             ))
         st.caption(f"当前展示: {result['name']} · {result['code']} | {result['start']} 至 {result['end']}")
+    style_chart(figure)
+    st.plotly_chart(figure, width="stretch", theme=None, key="nav_chart")
+
+
+def style_chart(figure: go.Figure, yaxis_title: str = "净值") -> None:
+    """统一单基金和对比页面的图表风格, 不改变传入数据."""
     figure.update_layout(
         template="plotly_white", paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF",
         font=dict(family="Segoe UI, Microsoft YaHei, sans-serif", size=12, color="#64748B"),
-        height=440, xaxis_title="日期", yaxis_title="净值", xaxis_type="date",
+        height=440, xaxis_title="日期", yaxis_title=yaxis_title, xaxis_type="date",
         hovermode="x unified", hoverlabel=dict(bgcolor="#FFFFFF", bordercolor="#E2E8F0"),
-        legend=dict(orientation="h", y=1.02, x=0, font=dict(color="#1F2937")),
+        legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, font=dict(color="#1F2937")),
         margin=dict(l=10, r=10, t=35, b=10),
     )
     figure.update_xaxes(
@@ -194,7 +211,6 @@ def show_chart(result: dict | None) -> None:
     figure.update_yaxes(
         gridcolor="#EDF2F7", zeroline=False, showline=False, title_font=dict(size=12), automargin=True,
     )
-    st.plotly_chart(figure, width="stretch", theme=None, key="nav_chart")
 
 
 def show_performance(result: dict | None) -> None:
@@ -277,6 +293,7 @@ def show_data_notes() -> None:
         st.write("页面读取本地已下载数据, 不提供实时行情, 不自动请求 Tushare. 快捷区间以所选基金的本地最新净值日为基准, 全部范围取实际数据起止日.")
         st.write("单位净值, 累计净值和复权单位净值直接使用来源数据. 多条曲线保留原始量级, 缺失值保持断点, 不插值或归一化.")
         st.write("概览中的成立日期, 投资类型和业绩比较基准来自本地当前基金档案, 不按净值区间还原历史资料或历史基准.")
+        st.write("基金对比使用共同开市日的复权净值计算累计收益, 从相同起点的 0% 开始. 原始净值不修改, 中间缺失保留断点, 实际比较区间以结果标注为准.")
     with st.container(border=True, key="notes_metrics"):
         st.subheader("绩效指标")
         st.write("七项指标均通过现有服务按交易日复权净值计算, 不随所选曲线类型变化. 实际计算区间, 样本数, 年化系数, 无风险利率和目标收益率以查询结果中的计算口径为准.")

@@ -22,7 +22,10 @@
 .st-key-asset_panel,
 .st-key-notes_nav,
 .st-key-notes_metrics,
-.st-key-notes_details {
+.st-key-notes_details,
+.st-key-comparison_search,
+.st-key-comparison_panel,
+.st-key-comparison_performance {
   background: #FFFFFF;
   border-color: #E2E8F0;
   border-radius: 0.625rem;

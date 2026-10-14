@@ -164,3 +164,73 @@ def test_quick_ranges_use_local_last_date_and_handle_leap_year():
     for label, start in expected.items():
         assert range_dates(label, bounds) == (start, bounds[1])
     assert range_dates("近1年", (date(2024, 2, 1), bounds[1])) == (date(2024, 2, 1), bounds[1])
+
+
+def test_comparison_page_multi_fund_dates_and_navigation(page):
+    app, path = page
+    with connect(path) as db:
+        db.execute("UPDATE fund_nav SET nav_date=nav_date-INTERVAL '1 year', ann_date=ann_date-INTERVAL '1 year' WHERE ts_code='000002.OF'")
+        db.execute("INSERT INTO fund_basic(ts_code,name,found_date) VALUES ('000003.OF','样本丙','2019-01-01')")
+        db.execute("INSERT INTO fund_nav SELECT '000003.OF',ann_date,nav_date,unit_nav,accum_nav,adj_nav,accum_div FROM fund_nav WHERE ts_code='000001.OF'")
+        db.execute("UPDATE fund_nav SET adj_nav=unit_nav")
+    app.selectbox(key="fund_choice").select("000001.OF").run()
+    app.button(key="submit_query").click().run()
+    original = traces(app)
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    assert traces(app) == []
+    assert app.multiselect(key="comparison_codes").value == []
+    codes = ["000001.OF", "000002.OF"]
+    app.multiselect(key="comparison_codes").set_value(codes).run()
+    app.button(key="submit_comparison").click().run()
+    assert len(traces(app)) == 2 and all(t["connectgaps"] is False for t in traces(app))
+    assert app.dataframe[0].value.shape == (7, 3)
+    result = app.session_state["comparison_result"]
+    assert result["start_date"] == "2020-01-01" and result["end_date"] == "2020-01-03"
+    assert result["cumulative_returns"].iloc[0, 1:].eq(0).all()
+    app.multiselect(key="comparison_codes").set_value([*codes, "000003.OF"]).run()
+    assert len(traces(app)) == 2
+    assert any("上次对比结果" in i.value for i in app.info)
+    app.radio(key="workspace_page").set_value("数据说明").run()
+    app.radio(key="workspace_page").set_value("基金分析").run()
+    assert traces(app) == original
+    assert app.text_input(key="fund_code").value == "000001.OF"
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    assert len(app.multiselect(key="comparison_codes").value) == 3
+    assert len(traces(app)) == 2
+    app.button(key="submit_comparison").click().run()
+    assert len(traces(app)) == 3 and app.dataframe[0].value.shape == (7, 4)
+    app.segmented_control(key="comparison_time_range").select("自定义").run()
+    app.date_input(key="comparison_custom_start").set_value(date(2020, 1, 2)).run()
+    app.button(key="submit_comparison").click().run()
+    assert app.session_state["comparison_result"]["start_date"] == "2020-01-02"
+    assert not app.exception
+
+
+def test_comparison_page_handles_gaps_invalid_ranges_and_storage_failure(page, monkeypatch, tmp_path):
+    app, path = page
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    codes = ["000001.OF", "000002.OF"]
+    app.multiselect(key="comparison_codes").set_value(codes).run()
+    app.button(key="submit_comparison").click().run()
+    assert traces(app) == [] and any("没有共同净值区间" in e.value for e in app.error)
+    app.multiselect(key="comparison_codes").set_value(codes[:1]).run()
+    app.button(key="submit_comparison").click().run()
+    assert traces(app) == [] and any("至少选择两只" in e.value for e in app.error)
+    with connect(path) as db:
+        db.execute("UPDATE fund_nav SET nav_date=nav_date-INTERVAL '1 year', ann_date=ann_date-INTERVAL '1 year', adj_nav=unit_nav WHERE ts_code='000002.OF'")
+    app.multiselect(key="comparison_codes").set_value(codes).run()
+    app.button(key="submit_comparison").click().run()
+    result = app.session_state["comparison_result"]
+    assert result["metrics"]["000001.OF"] is None
+    assert result["metrics"]["000002.OF"] is not None
+    assert result["cumulative_returns"]["000001.OF"].isna().sum() == 1
+    assert app.dataframe[0].value.iloc[:, 1].eq("无法计算").all()
+    assert traces(app)[0]["connectgaps"] is False
+    app.segmented_control(key="comparison_time_range").select("自定义").run()
+    app.date_input(key="comparison_custom_start").set_value(date(2020, 1, 3)).run()
+    app.date_input(key="comparison_custom_end").set_value(date(2020, 1, 1)).run()
+    app.button(key="submit_comparison").click().run()
+    assert traces(app) == [] and any("开始日期不能晚于结束日期" in e.value for e in app.error)
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "missing.duckdb"))
+    app.run()
+    assert traces(app) == [] and any("无法读取本地基金列表" in e.value for e in app.error)
