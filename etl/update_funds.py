@@ -143,9 +143,11 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
                 summary["status"] = "partial"
                 logging.error("Calendar update failed: %s", exc)
 
-        for code, name, market, found, last in targets:
+        for index, (code, name, market, found, last) in enumerate(targets, start=1):
             if selected == {"calendar"}:
                 break
+            # 每开始处理一只基金输出进度, 总数来自本轮数据库基金清单.
+            logging.info("更新进度 %s/%s", index, len(targets))
             record = {"code": code, "name": name, "status": "ok"}
             summary["funds"].append(record)
             try:
