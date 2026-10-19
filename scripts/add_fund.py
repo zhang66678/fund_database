@@ -1,51 +1,59 @@
-"""添加场外基金资料: python -m scripts.add_fund 040001.OF."""
+"""添加场外基金资料: 单只代码, --file 批量入库或 --from-list 生成候选清单."""
 
 import argparse
+import json
 import logging
-import re
+from datetime import datetime
 from pathlib import Path
 
-from database.connection import DATABASE_PATH, ROOT, connect
-from database.writer import write_batch
-from etl.import_snapshot import normalize
-from api.fund_fields import BASIC
+from database.connection import DATABASE_PATH, ROOT
+from etl.add_funds import DEFAULT_BATCH_SIZE, add_fund, add_funds, prepare_fund_batch
 from api.tushare_client import Source
-
-
-def add_fund(source, code: str, database_path: Path = DATABASE_PATH) -> dict:
-    """从接口获取真实资料并 UPSERT, 不修改净值或其他历史表."""
-    code = code.strip().upper()
-    if re.fullmatch(r"[0-9]{6}", code):
-        code += ".OF"
-    if not re.fullmatch(r"[0-9]{6}\.OF", code):
-        raise ValueError("请输入六位场外基金代码, 例如 040001 或 040001.OF")
-    if not database_path.is_file():
-        raise FileNotFoundError("请先运行 python -m scripts.init_database 初始化数据库")
-    logging.info("Adding fund: %s", code)
-    raw = source.query("fund_basic", BASIC, ts_code=code, market="O")
-    if len(raw) != 1 or not raw.ts_code.eq(code).all() or not raw.market.eq("O").all():
-        raise ValueError("未获取到唯一匹配的场外基金资料, 数据库未修改")
-    frame, _ = normalize("fund_basic", raw)
-    # 后续历史回填需要成立日期, 名称用于页面及更新日志.
-    if frame.found_date.isna().any() or frame.name.fillna("").str.strip().eq("").any():
-        raise ValueError("基金名称或成立日期缺失, 暂不能加入更新清单")
-    with connect(database_path) as connection:
-        counts = write_batch(connection, {"fund_basic": frame})["fund_basic"]
-    logging.info("Fund saved: %s %s %s", code, frame.name.iloc[0], counts)
-    return counts
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("code", help="基金代码, 例如 040001 或 040001.OF")
+    parser.add_argument("code", nargs="?", help="基金代码, 例如 040001 或 040001.OF")
+    parser.add_argument("--file", type=Path, dest="csv_path", help="固定批次 CSV, 必须有 ts_code 列")
+    parser.add_argument("--from-list", type=Path, nargs="?", const=ROOT / "data/exploration",
+                        help="仅生成批次清单; 不传路径时取最新本地基金名单")
+    parser.add_argument("--limit", type=int, help=f"生成清单时最多选几只, 默认 {DEFAULT_BATCH_SIZE}")
+    parser.add_argument("--status", nargs="+", choices=("L", "D", "I"), help="筛选存续状态, 默认 L")
+    parser.add_argument("--fund-types", nargs="+", help="筛选基金类型, 可选多个, 如 股票型 混合型")
+    parser.add_argument("--output", type=Path, help="生成的批次 CSV 路径, 默认自动生成时间戳文件名")
     parser.add_argument("--database", type=Path, default=DATABASE_PATH)
     args = parser.parse_args()
-    (ROOT / "logs").mkdir(exist_ok=True)
+    if sum(value is not None for value in (args.code, args.csv_path, args.from_list)) != 1:
+        parser.error("基金代码, --file 和 --from-list 三选一")
+    if args.from_list is None and any(value is not None for value in (args.limit, args.status, args.fund_types, args.output)):
+        parser.error("--limit, --status, --fund-types 和 --output 仅用于 --from-list 模式")
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(ROOT / "logs/add_fund.log", encoding="utf-8")])
+        logging.StreamHandler(), logging.FileHandler(log_dir / "add_fund.log", encoding="utf-8")])
     try:
+        if args.from_list is not None:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            output = args.output or ROOT / "data/fund_batches" / f"batch_{stamp}.csv"
+            summary = prepare_fund_batch(
+                args.from_list, output, args.database,
+                limit=args.limit if args.limit is not None else DEFAULT_BATCH_SIZE,
+                statuses=args.status or ["L"], fund_types=args.fund_types,
+            )
+            path = log_dir / f"fund_batch_{stamp}.json"
+            path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            logging.info("已生成 %s 只基金的候选清单: %s; 筛选摘要: %s", summary["selected"], output, path)
+            logging.info("本次未入库. 确认清单后用 --file 指向同一文件, 再运行统一更新命令")
+            return 0
+        if args.csv_path is not None:
+            summary = add_funds(args.csv_path, args.database)
+            path = log_dir / f"add_funds_{datetime.now():%Y%m%d_%H%M%S_%f}.json"
+            path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            logging.info("批量添加摘要: %s", path)
+            logging.info("请运行 python -m scripts.update_database 更新历史数据; 自定义数据库需传同一 --database")
+            return int(summary["status"] != "completed")
         add_fund(Source(), args.code, args.database)
-        logging.info("完成. 请运行 python -m scripts.update_database 获取历史净值和分红; 自定义数据库需传同一 --database")
+        logging.info("完成. 请运行 python -m scripts.update_database 更新历史数据; 自定义数据库需传同一 --database")
         return 0
     except Exception as exc:
         # Source 已对接口异常脱敏, 命令入口记录失败并返回非零状态.

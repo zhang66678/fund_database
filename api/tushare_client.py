@@ -21,8 +21,11 @@ class FetchError(RuntimeError):
 class Source:
     """加载凭证, 并统一处理请求间隔, 有限重试和错误分类."""
 
-    def __init__(self, interval: float = 1.0, attempts: int = 3):
-        """interval 为请求最小间隔(秒), attempts 为包含首次请求的总尝试次数."""
+    def __init__(self, interval: float = 0.15, attempts: int = 3):
+        """默认间隔 0.15 秒, 单个客户端理论上限约 400 次/分钟.
+
+        interval 为请求最小间隔(秒), attempts 为包含首次请求的总尝试次数.
+        """
         # 优先使用环境变量, 否则读取项目根目录的 .env, 不依赖终端当前目录.
         # 关闭变量插值, 按配置原值读取 Token; 不向环境或其他文件回写凭证.
         token = os.environ.get('TUSHARE_TOKEN') or dotenv_values(

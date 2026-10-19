@@ -1,8 +1,8 @@
-"""读取数据库基金清单逐只更新, 不依赖固定代码或 top_10.csv."""
+"""读取数据库基金清单逐只更新, 不依赖固定代码"""
 
 import logging
 from collections.abc import Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -19,15 +19,35 @@ REFRESH_DAYS = 7
 DATASETS = ("basic", "nav", "dividend", "manager", "asset", "calendar")
 
 
+def _normalize_series(table: str, raw: pd.DataFrame, code: str,
+                      rejected_dir: Path) -> tuple[pd.DataFrame, int, dict]:
+    """隔离缺少公告日期的净值和资产原始行, 其余记录仍需通过严格校验."""
+    missing = raw.ann_date.astype("string").str.strip().fillna("").eq("")
+    quality = {}
+    if missing.any():
+        # 保留异常原始记录供补查, 不用净值日或其他日期替代公告日期.
+        rejected_dir.mkdir(parents=True, exist_ok=True)
+        path = rejected_dir / f"{table}_{code}.csv"
+        raw.loc[missing].to_csv(path, index=False, encoding="utf-8-sig")
+        quality = {"rejected_rows": int(missing.sum()), "reason": "missing ann_date",
+                   "rejected_file": str(path)}
+        logging.warning("%s %s: %s", table, code, quality)
+    frame, duplicates = normalize(table, raw.loc[~missing])
+    return frame, duplicates, quality
+
+
 def _update_details(source, connection, code: str, found: date, end: date,
-                    refresh_days: int, full_history: bool, datasets: set[str]) -> dict:
-    """经理和资产在同一更新流程中执行, 分别提交以隔离接口失败."""
+                    refresh_days: int, full_history: bool, datasets: set[str],
+                    rejected_dir: Path) -> dict:
+    """分红, 经理和资产分别获取并提交, 单项失败不影响其他数据."""
     results = {}
-    for dataset, table in (("manager", "fund_manager"), ("asset", "fund_asset")):
+    for dataset, table in (("dividend", "fund_dividend"), ("manager", "fund_manager"), ("asset", "fund_asset")):
         if dataset not in datasets:
             continue
         try:
-            if table == "fund_manager":
+            if table == "fund_dividend":
+                raw = paged(source, "fund_div", DIV_FIELDS, ts_code=code)
+            elif table == "fund_manager":
                 raw = paged(source, "fund_manager", MANAGER_FIELDS, ts_code=code)
             else:
                 if pd.isna(found):
@@ -40,7 +60,11 @@ def _update_details(source, connection, code: str, found: date, end: date,
                 raw = fetch_series(source, "fund_nav", ASSET_FIELDS, code, start, end)
             if not raw.ts_code.eq(code).all():
                 raise ValueError(f"{table}: unexpected fund code")
-            frame, duplicates = normalize(table, raw)
+            quality = {}
+            if table == "fund_asset":
+                frame, duplicates, quality = _normalize_series(table, raw, code, rejected_dir)
+            else:
+                frame, duplicates = normalize(table, raw)
             ignored = 0
             if table == "fund_asset":
                 # 资产独立确定更新窗口, 两项都未披露的行不入库也不填充.
@@ -50,8 +74,10 @@ def _update_details(source, connection, code: str, found: date, end: date,
                 if (frame[["net_asset", "total_netasset"]] < 0).any().any():
                     raise ValueError("fund_asset: negative asset value")
             counts = write_batch(connection, {table: frame})[table]
-            results[table] = {"status": "empty" if frame.empty else "ok", "counts": counts,
+            results[table] = {"status": "partial" if quality else "empty" if frame.empty else "ok", "counts": counts,
                               "source_duplicates": duplicates, "ignored_empty_rows": ignored}
+            if quality:
+                results[table]["quality"] = quality
             if table == "fund_asset":
                 results[table].update(start=str(start), end=str(end))
             logging.info("%s %s: %s", table, code, results[table])
@@ -68,6 +94,8 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
     """默认从每只基金最后净值日前回看 7 天, 补上停更期间的数据.
 
     基础资料, 分红和经理每次重新获取; 净值和资产按各自最新日期补更.
+    基础资料与净值共同提交, 分红, 经理和资产各自提交并记录失败.
+    净值和资产缺少公告日期时隔离原始行, 合格记录继续入库, 本轮标记 partial.
     datasets 不传时更新全部, 指定时只请求和写入选中的数据.
     full_history 对选中的净值, 资产和日历复查全部历史.
     本机 DuckDB 更新期间需停止网站, 不在网络请求期间开启数据库事务.
@@ -82,6 +110,7 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
         raise FileNotFoundError("Database missing; run scripts.init_database first")
     summary = {"funds": [], "calendar": {}, "status": "completed",
                "datasets": [item for item in DATASETS if item in selected]}
+    rejected_dir = database_path.parent / "rejected_rows" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     with connect(database_path) as connection:
         # 为旧数据库补建新增的表, 不清空已有数据.
         connection.execute("BEGIN TRANSACTION")
@@ -134,20 +163,19 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
                     if start <= end:
                         logging.info("Updating %s %s: %s to %s", code, name, start, end)
                         nav = fetch_series(source, "fund_nav", NAV_FIELDS, code, start, end)
-                        frames["fund_nav"], _ = normalize("fund_nav", nav)
-                        record["status"] = "empty_nav" if nav.empty else "ok"
+                        frames["fund_nav"], _, quality = _normalize_series("fund_nav", nav, code, rejected_dir)
+                        record["status"] = "partial" if quality else "empty_nav" if nav.empty else "ok"
+                        if quality:
+                            record["quality"] = {"fund_nav": quality}
+                            summary["status"] = "partial"
                         record["start"] = str(start)
                         if nav.empty:
                             logging.warning("No NAV returned for %s %s; existing data preserved", code, name)
                     else:
                         record["status"] = "skipped"
                         logging.info("Skipped future NAV: %s %s", code, name)
-                if "dividend" in selected:
-                    div = paged(source, "fund_div", DIV_FIELDS, ts_code=code)
-                    if not div.ts_code.eq(code).all():
-                        raise ValueError("Unexpected dividend fund code")
-                    frames["fund_dividend"], _ = normalize("fund_dividend", div)
                 if frames:
+                    # 先保存基础资料和净值, 后续分红异常不会阻止入库.
                     record["counts"] = write_batch(connection, frames)
                     logging.info("Updated %s %s: %s", code, name, record["counts"])
             except Exception as exc:
@@ -155,14 +183,15 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
                 record.update(status="failed", error=str(exc))
                 summary["status"] = "partial"
                 logging.error("Fund failed: %s %s: %s", code, name, exc)
-            if selected & {"manager", "asset"}:
-                record["details"] = _update_details(source, connection, code, found, end, refresh_days, full_history, selected)
+            if selected & {"dividend", "manager", "asset"}:
+                record["details"] = _update_details(source, connection, code, found, end, refresh_days,
+                                                     full_history, selected, rejected_dir)
                 for table, result in record["details"].items():
-                    if result["status"] == "failed":
+                    if result["status"] in ("failed", "partial"):
                         summary["status"] = "partial"
                         if record["status"] != "failed":
                             record["status"] = "partial"
-                    elif "counts" in result:
+                    if "counts" in result:
                         record.setdefault("counts", {})[table] = result["counts"]
     logging.info("Update finished: status=%s funds=%s failed=%s", summary["status"], len(summary["funds"]),
                  sum(r["status"] in ("failed", "partial") for r in summary["funds"]))

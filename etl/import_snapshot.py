@@ -29,8 +29,12 @@ def normalize(table: str, source: pd.DataFrame) -> tuple[pd.DataFrame, int]:
             frame[column] = pd.to_numeric(frame[column], errors="raise").astype("Int64")
     duplicates = int(frame.duplicated().sum())
     frame = frame.drop_duplicates()
-    if frame[list(spec["key"])].isna().any().any() or frame.duplicated(list(spec["key"])).any():
-        raise ValueError(f"{table}: missing or conflicting primary key")
+    missing = frame[list(spec["key"])].isna().sum()
+    if missing.any():
+        raise ValueError(f"{table}: missing primary key values: {missing[missing.gt(0)].to_dict()}")
+    conflicts = frame.duplicated(list(spec["key"]), keep=False)
+    if conflicts.any():
+        raise ValueError(f"{table}: conflicting primary key values: {int(conflicts.sum())} rows")
     return frame, duplicates
 
 

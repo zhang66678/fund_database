@@ -3,6 +3,11 @@
 from database.schema import TABLES
 
 
+def existing_fund_codes(connection) -> set[str]:
+    """以完整基金档案排重, 不要求基金已下载净值或仍在存续."""
+    return {row[0] for row in connection.execute("SELECT ts_code FROM fund_basic").fetchall()}
+
+
 def update_targets(connection) -> list[tuple]:
     """从完整基金表读取任务, 包括已终止基金和没有净值的新入库基金."""
     return connection.execute('''
@@ -41,7 +46,12 @@ def upsert(connection, table: str, frame) -> dict:
     # SQL 标识符只取自固定 schema, 用户数据通过注册表传入.
     join = " AND ".join(f't."{k}" = s."{k}"' for k in keys)
     changed = " OR ".join(f't."{c}" IS DISTINCT FROM s."{c}"' for c in values)
-    connection.register("incoming", frame)
+    # Decimal 对象的抽样推断可能漏掉较大的值, 先用精确字符串传入再按 schema 转换.
+    incoming = frame.copy()
+    for column, kind in spec["columns"].items():
+        if kind.startswith("DECIMAL"):
+            incoming[column] = incoming[column].astype("string")
+    connection.register("incoming", incoming)
     try:
         # 先转换到目标类型, 避免浮点/Decimal 差异影响幂等性统计.
         casts = ", ".join(f'CAST("{c}" AS {spec["columns"][c]}) AS "{c}"' for c in columns)

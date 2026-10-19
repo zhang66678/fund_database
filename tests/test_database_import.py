@@ -1,4 +1,6 @@
-"""一个集成用例验证重复导入, 修订更新和整批回滚."""
+"""验证精确写入, 重复导入, 修订更新和整批回滚."""
+
+from decimal import Decimal
 
 import duckdb
 import pandas as pd
@@ -7,7 +9,8 @@ import pytest
 from database.connection import connect
 from database.schema import TABLES, initialize
 from database.duckdb_repository import DuckDBFundRepository
-from etl.import_snapshot import FILES, import_snapshot
+from database.writer import write_batch
+from etl.import_snapshot import FILES, import_snapshot, normalize
 
 
 def test_import_is_idempotent_and_atomic(tmp_path):
@@ -64,3 +67,20 @@ def test_database_query_selects_latest_announcement(tmp_path):
     assert repo.get_nav("unknown").empty
     assert repo.get_nav("unknown").columns.tolist() == nav.columns.tolist()
     assert len(repo.get_calendar()) == 1
+
+
+def test_decimal_write_uses_schema_precision(tmp_path):
+    """较大数值不在抽样内时也能精确写入, 空值和重复写入行为保持不变."""
+    raw = pd.DataFrame([
+        dict(ts_code="202003.OF", nav_date="20200102", ann_date="20200103", unit_nav="1.12345678"),
+        dict(ts_code="202003.OF", nav_date="20200103", ann_date="20200104", unit_nav="10.075872"),
+    ], columns=list(TABLES["fund_nav"]["columns"]))
+    frame, _ = normalize("fund_nav", raw)
+    with connect(tmp_path / "decimal.duckdb") as db:
+        initialize(db)
+        # 缩小抽样范围, 稳定复现旧实现的 DECIMAL(9,8) 越界问题.
+        db.execute("SET pandas_analyze_sample=1")
+        assert write_batch(db, {"fund_nav": frame})["fund_nav"]["inserted"] == 2
+        assert db.execute("SELECT unit_nav,adj_nav FROM fund_nav ORDER BY nav_date").fetchall() == [
+            (Decimal("1.1234567800"), None), (Decimal("10.0758720000"), None)]
+        assert write_batch(db, {"fund_nav": frame})["fund_nav"] == {"inserted": 0, "updated": 0, "unchanged": 2}

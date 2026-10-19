@@ -7,6 +7,10 @@ import pandas as pd
 from api.tushare_client import FetchError
 
 
+# 每次历史请求覆盖的自然年数, 净值和资产共用此设置.
+WINDOW_YEARS = 6
+
+
 def paged(source, endpoint: str, fields: str, size: int = 1000, **params) -> pd.DataFrame:
     """分页读取直到空页; 如果服务器重复返回同一页, 则报错停止.
 
@@ -33,12 +37,12 @@ def paged(source, endpoint: str, fields: str, size: int = 1000, **params) -> pd.
 
 def fetch_series(source, endpoint: str, fields: str, code: str,
                  start: date, end: date) -> pd.DataFrame:
-    """按两年窗口请求, 避免长历史被截断, 保留源数据的实际披露日期."""
+    """按配置的年份窗口请求, 避免长历史被截断, 保留源数据的实际披露日期."""
     parts = []
     date_col = 'nav_date' if endpoint == 'fund_nav' else 'trade_date'
-    for year in range(start.year, end.year + 1, 2):
+    for year in range(start.year, end.year + 1, WINDOW_YEARS):
         left = max(start, date(year, 1, 1)).strftime('%Y%m%d')
-        right = min(end, date(year + 1, 12, 31)).strftime('%Y%m%d')
+        right = min(end, date(year + WINDOW_YEARS - 1, 12, 31)).strftime('%Y%m%d')
         part = source.query(endpoint, fields, ts_code=code, start_date=left, end_date=right)
         if len(part) >= 2000:
             raise FetchError(f'{endpoint}: possible truncation for {left}-{right}')
