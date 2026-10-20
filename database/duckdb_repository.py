@@ -94,3 +94,12 @@ class DuckDBFundRepository:
                    CAST(total_netasset AS DOUBLE PRECISION) AS total_netasset
             FROM versions WHERE version_rank = 1 ORDER BY nav_date
         ''', [ts_code])
+
+    def get_dividends(self, ts_code: str) -> pd.DataFrame:
+        """读取全部分红披露, 保留公告及方案版本, 不汇总金额."""
+        return self._query('''
+            SELECT ann_date, ex_date, record_date, pay_date,
+                   CAST(div_cash AS DOUBLE PRECISION) AS div_cash, div_proc
+            FROM fund_dividend WHERE ts_code = ?
+            ORDER BY ex_date DESC NULLS LAST, ann_date DESC NULLS LAST, div_proc
+        ''', [ts_code])

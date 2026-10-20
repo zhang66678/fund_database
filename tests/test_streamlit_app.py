@@ -33,6 +33,10 @@ def page(tmp_path, monkeypatch):
         db.execute("INSERT INTO fund_manager(ts_code,name,begin_date,ann_date,edu,resume) VALUES "
                    "('000001.OF','经理甲','2019-01-01','2019-01-02','硕士','测试简历')")
         db.execute("INSERT INTO fund_asset VALUES ('000001.OF','2020-07-01','2020-06-30',1234.5,NULL)")
+        db.execute("""INSERT INTO fund_dividend(ts_code,ann_date,ex_date,record_date,pay_date,div_cash,div_proc)
+            VALUES ('000001.OF','2020-06-01','2020-06-05','2020-06-04','2020-06-08',0.05,'实施'),
+                   ('000001.OF','2020-05-28','2020-06-05','2020-06-04',NULL,0.05,'预案'),
+                   ('000001.OF','2019-01-01','2019-01-04','2019-01-03','2019-01-08',NULL,'实施')""")
     monkeypatch.delenv("NAV_CSV", raising=False)
     monkeypatch.setenv("DATABASE_PATH", str(path))
     app = Path(__file__).resolve().parents[1] / "app/streamlit_app.py"
@@ -73,10 +77,16 @@ def test_search_pending_changes_and_navigation_preserve_results(page):
     assert app.session_state["query_result"]["code"] == "000002.OF"
     assert any(m.value == "**投资类型:** 暂无数据" for m in app.markdown)
     assert any(m.value == "**业绩比较基准:** 暂无数据" for m in app.markdown)
+    assert any("暂无本地分红记录" in item.value for item in app.info)
+    # 热更新前保存的查询结果可能尚无分红字段, 页面应提示重新查询.
+    app.session_state["query_result"]["details"].pop("dividends")
+    app.run()
+    assert not app.exception
+    assert any("点击查询加载分红记录" in item.value for item in app.caption)
 
 
 def test_custom_dates_curves_overview_and_detail_columns(page):
-    app, _ = page
+    app, path = page
     app.selectbox(key="fund_choice").select("000001.OF").run()
     app.segmented_control(key="time_range").select("自定义").run()
     assert app.date_input(key="custom_start").proto.min == "2020-01-01"
@@ -103,11 +113,18 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
     assert any(m.value == "**业绩比较基准:** 测试指数收益率×80%+债券指数收益率×20%" for m in app.markdown)
     assert not any("**样本甲**" in m.value for m in app.markdown)
     assert any("离任日期未提供不代表仍在任职" in c.value for c in app.caption)
+    dividends = app.session_state["query_result"]["details"]["dividends"]
+    assert len(dividends) == 3
+    assert [row["div_proc"] for row in dividends[:2]] == ["实施", "预案"]
+    assert dividends[0]["ex_date"] == pd.Timestamp("2020-06-05")
+    assert dividends[0]["div_cash"] == 0.05 and pd.isna(dividends[-1]["div_cash"])
+    assert any("0.05 元/份" in expander.label and expander.proto.expanded for expander in app.expander)
+    assert any("金额未提供" in expander.label for expander in app.expander)
     positions = {}
     def visit(node, path=()):
         for i, child in getattr(node, "children", {}).items():
             here = (*path, i)
-            if child.type == "subheader" and child.value in ("基金经理", "资产信息"):
+            if child.type == "subheader" and child.value in ("绩效分析", "分红记录", "基金经理", "资产信息"):
                 positions[child.value] = here
             if child.type == "date_input":
                 positions["date"] = here
@@ -116,8 +133,17 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
             visit(child, here)
     visit(app.main)
     assert positions["date"] < positions["chart"]
+    assert positions["绩效分析"][0] == positions["分红记录"][0]
+    assert positions["绩效分析"] < positions["分红记录"]
     assert positions["基金经理"][0] == positions["资产信息"][0]
     assert not app.dataframe
+    # 分红读取失败时, 已有净值和其他资料仍可正常展示.
+    with connect(path) as db:
+        db.execute("DROP TABLE fund_dividend")
+    app.button(key="submit_query").click().run()
+    assert not app.exception
+    assert any("分红记录暂不可用" in item.value for item in app.warning)
+    assert app.session_state["query_result"]["details"]["asset"] is not None
 
 
 def test_invalid_conditions_empty_data_and_storage_failure_keep_empty_chart(page, monkeypatch, tmp_path):

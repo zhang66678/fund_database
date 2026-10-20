@@ -81,6 +81,10 @@ class CsvFundRepository:
         """旧 CSV 对照模式尚未提供资产资料, 不混用数据库数据."""
         raise ValueError("CSV 对照模式暂不提供基金资产资料")
 
+    def get_dividends(self, ts_code: str) -> pd.DataFrame:
+        """旧 CSV 对照模式尚未提供分红资料, 不混用数据库数据."""
+        raise ValueError("CSV 对照模式暂不提供分红记录")
+
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
         end_date: date | None = None,

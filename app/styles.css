@@ -18,6 +18,7 @@
 .st-key-fund_overview,
 .st-key-nav_panel,
 .st-key-performance_panel,
+.st-key-dividend_panel,
 .st-key-manager_panel,
 .st-key-asset_panel,
 .st-key-notes_nav,
@@ -53,6 +54,10 @@
   min-height: 6rem;
 }
 
+.st-key-performance_panel [data-testid="stMetricValue"] {
+  font-size: clamp(1.125rem, 2vw, 1.5rem);
+}
+
 .st-key-asset_panel [data-testid="stMetricValue"] {
   font-size: clamp(1.25rem, 2vw, 1.75rem);
 }
@@ -81,6 +86,20 @@
 .st-key-sidebar_navigation [role="radiogroup"] label:has(input:checked) {
   color: #2563EB;
   background: #EFF6FF;
+}
+
+/* 绩效与分红在窄屏转为上下排列, 不影响内部指标列. */
+@media (max-width: 1280px) {
+  .st-key-analysis_row [data-testid="stHorizontalBlock"]:has(.st-key-performance_panel) {
+    flex-wrap: wrap;
+  }
+
+  .st-key-analysis_row [data-testid="stColumn"]:has(.st-key-performance_panel),
+  .st-key-analysis_row [data-testid="stColumn"]:has(.st-key-dividend_panel) {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 /* 卡片随可用空间换行, 资产金额保持原始格式且不截断. */

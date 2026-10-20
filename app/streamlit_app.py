@@ -10,7 +10,7 @@ import streamlit as st
 from app.bootstrap import create_service
 from app.comparison_page import show_comparison_page
 from app.components import (
-    choice_code, show_chart, show_data_notes, show_details, show_filters,
+    choice_code, show_chart, show_data_notes, show_details, show_dividends, show_filters,
     show_navigation, show_overview, show_performance, show_search,
 )
 
@@ -142,7 +142,12 @@ def main() -> None:
 
     with overview_area:
         show_overview(result)
-    show_performance(result)
+    with st.container(key="analysis_row"):
+        left, right = st.columns(2, gap="medium")
+        with left:
+            show_performance(result)
+        with right:
+            show_dividends(result)
     show_details(result)
 
 

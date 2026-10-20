@@ -277,7 +277,8 @@ def show_performance(result: dict | None) -> None:
             return
         metrics = result["metrics"]
         items = list(METRICS.items())
-        for row in (items[:3], items[3:]):
+        # 半宽卡片按 3, 2, 2 排列, 保留七项指标及原有计算口径.
+        for row in (items[:3], items[3:5], items[5:]):
             for column, (key, (label, fmt)) in zip(st.columns(len(row)), row):
                 value = metrics["metrics"][key]
                 column.metric(label, "无法计算" if value is None else format(value, fmt), border=True)
@@ -287,6 +288,36 @@ def show_performance(result: dict | None) -> None:
             st.caption(f"实际区间: {metrics['start_date']} 至 {metrics['end_date']}, {metrics['nav_count']} 条交易日复权净值.")
             st.caption(f"年化系数 {metrics['periods_per_year']}, 无风险利率 {metrics['risk_free_rate']:.1%}, 目标收益率 {metrics['target_return']:.1%}.")
             st.caption(f"排除 {metrics['excluded_non_trading_rows']} 条非交易日披露. 无法计算表示样本或风险分母不满足计算条件.")
+
+
+def show_dividends(result: dict | None) -> None:
+    with st.container(border=True, key="dividend_panel"):
+        st.subheader("分红记录")
+        if result is None:
+            st.caption("查询后展示本地分红记录.")
+            return
+        details = result["details"]
+        if "dividends" in details["errors"]:
+            st.warning(f"分红记录暂不可用: {details['errors']['dividends']}")
+            return
+        records = details.get("dividends")
+        if records is None:
+            st.caption("点击查询加载分红记录.")
+            return
+        if not records:
+            st.info("暂无本地分红记录, 不代表基金从未分红.")
+            return
+        st.caption("按除息日倒序展示本地全部披露, 不受净值区间限制. 同一事件可能有不同方案或公告版本.")
+        # 折叠列表在卡片内滚动, 保留每条披露, 不累加不同版本的派现金额.
+        with st.container(height=340, border=False):
+            for index, record in enumerate(records):
+                cash = record["div_cash"]
+                amount = "金额未提供" if pd.isna(cash) else f"{cash:.10f}".rstrip("0").rstrip(".") + " 元/份"
+                progress = "进度未提供" if pd.isna(record["div_proc"]) else record["div_proc"]
+                with st.expander(f"{_date_text(record['ex_date'])} | {amount} | {progress}", expanded=index == 0):
+                    st.write(f"权益登记日: {_date_text(record['record_date'])}")
+                    st.write(f"派息日: {_date_text(record['pay_date'])}")
+                    st.caption(f"公告日期: {_date_text(record['ann_date'])} | 方案进度: {progress}")
 
 
 def _show_managers(details: dict | None) -> None:
@@ -353,6 +384,7 @@ def show_data_notes() -> None:
         st.write("七项指标均通过现有服务按交易日复权净值计算, 不随所选曲线类型变化. 实际计算区间, 样本数, 年化系数, 无风险利率和目标收益率以查询结果中的计算口径为准.")
         st.write("区间不足一年时保留年化提示. 当前使用 SSE 日历, 特殊基金的交易日适用性仍需单独核查. 缺少有效净值或完整日历时不补造指标.")
     with st.container(border=True, key="notes_details"):
-        st.subheader("经理与资产资料")
+        st.subheader("分红, 经理与资产资料")
+        st.write("分红展示本地全部披露, 按除息日和公告日期倒序, 金额按每份派现金额原值展示. 同一事件可能有不同方案进度或公告版本, 不将记录条数当作实际分红次数, 不直接累加各版本金额. 无本地记录不代表从未分红.")
         st.write("同一经理姓名和任期采用最新公告记录, 离任日期未提供不代表仍在任职. 资产展示本地最新披露日期及原始金额, 不假设单位, 不换算为亿元, 不将两种口径相加.")
-        st.write("经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式暂不提供这两类资料.")
+        st.write("分红, 经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式暂不提供这三类资料.")

@@ -132,14 +132,16 @@ class FundService:
         }
 
     def get_details(self, ts_code: str) -> dict:
-        """提供基础资料, 经理任职及最新资产披露, 各类读取互不影响."""
+        """提供基础资料, 经理任职, 最新资产及分红披露, 各类读取互不影响."""
         code = _normalize_code(ts_code)
-        result = {"code": code, "basic": None, "managers": [], "asset": None, "errors": {}}
+        result = {"code": code, "basic": None, "managers": [], "asset": None,
+                  "dividends": [], "errors": {}}
         for key, query in (("basic", self._repository.get_basic),
-                           ("managers", self._repository.get_managers), ("asset", self._repository.get_assets)):
+                           ("managers", self._repository.get_managers), ("asset", self._repository.get_assets),
+                           ("dividends", self._repository.get_dividends)):
             try:
                 frame = query(code)
-                result[key] = frame.to_dict("records") if key == "managers" else (
+                result[key] = frame.to_dict("records") if key in ("managers", "dividends") else (
                     None if frame.empty else frame.iloc[-1].to_dict())
             except (ValueError, OSError, UnicodeError) as exc:
                 # 返回具体资料的失败原因, 由页面展示并记录日志, 不隐瞒读取错误.

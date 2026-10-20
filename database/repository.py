@@ -10,6 +10,7 @@ NAV_COLUMNS = ["nav_date", "unit_nav", "accum_nav", "adj_nav"]
 BASIC_COLUMNS = ["found_date", "fund_type", "benchmark"]
 MANAGER_COLUMNS = ["ann_date", "name", "begin_date", "end_date", "edu", "resume"]
 ASSET_COLUMNS = ["ann_date", "nav_date", "net_asset", "total_netasset"]
+DIVIDEND_COLUMNS = ["ann_date", "ex_date", "record_date", "pay_date", "div_cash", "div_proc"]
 
 
 class FundRepository(Protocol):
@@ -55,5 +56,13 @@ class FundRepository(Protocol):
         """返回 ASSET_COLUMNS, 每个净值日期取最新公告, 按日期升序.
 
         保留两种资产口径和缺失值, 不换算单位. 未支持此项的数据源抛出 ValueError.
+        """
+        ...
+
+    def get_dividends(self, ts_code: str) -> pd.DataFrame:
+        """返回 DIVIDEND_COLUMNS, 按除息日和公告日倒序展示全部本地披露.
+
+        日期为 pandas 日期, 派现金额为浮点数, 保留缺失值和不同方案版本.
+        不累加金额或推断实际分红次数, 未支持的数据源抛出 ValueError.
         """
         ...
