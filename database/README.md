@@ -144,6 +144,26 @@ ts_code
 .\.venv\Scripts\python.exe -m scripts.update_database
 ```
 
+默认更新数据库中的全部基金. 若只想下载本次新增批次的数据, 使用添加时的同一个 CSV:
+
+```powershell
+# 添加本批基金基础资料
+.\.venv\Scripts\python.exe -m scripts.add_fund --file data/fund_batches/batch_001.csv
+
+# 只更新本批基金的历史数据
+.\.venv\Scripts\python.exe -m scripts.update_database --file data/fund_batches/batch_001.csv
+
+# 少量基金也可以直接指定代码
+.\.venv\Scripts\python.exe -m scripts.update_database --codes 000001 040001.OF
+
+# 只更新本批基金的净值和资产
+.\.venv\Scripts\python.exe -m scripts.update_database --file data/fund_batches/batch_001.csv --datasets nav asset
+```
+
+`--file` 与 `--codes` 二选一, 不传则更新全库. CSV 只需 `ts_code` 列, 名称等其他列不参与更新; 代码自动统一为 `.OF` 后缀并去重. 所有指定基金必须先添加到数据库, 未入库代码或空名单会报错, 不自动添加或退回全库更新. 更新目标仍从数据库读取名称, 成立日期和最新净值日, 仅筛选本轮任务.
+
+指定 200 只基金时进度为 `1/200` 至 `200/200`, 不逐只请求其他基金. 范围参数可与 `--datasets`, `--full-history`, `--refresh-days` 组合使用. 不传 `--datasets` 仍更新所选基金的全部数据; 交易日历是共享数据, 选中 `calendar` 时仍统一更新一次. 同一批次可重复执行, 已有净值按窗口补更, 尚无净值的基金从成立日回填, 便于中断或失败后重试.
+
 不传 `--datasets` 时更新全部数据. 指定后只请求和写入对应条目, 可一次选择多个:
 
 | 参数值 | 更新内容 |
@@ -188,6 +208,8 @@ ts_code
 ```
 
 日志为 `logs/database_update.log`, 每次运行另存一个 `database_update_时间戳.json` 结果摘要, `datasets` 列出本次选择的条目, 含各基金状态及所选表的新增, 更新, 未变化数量. `details` 记录所选分红, 经理和资产的状态, 失败原因, 重复行及忽略的全空行; 分红失败可查看 `details.fund_dividend`. `partial` 返回非零退出码, 表示部分数据失败, 其他已成功的数据仍然保存. 暂不自动发现数据库之外的新基金, 不做并发请求或持久化任务队列.
+
+指定更新范围时, JSON 摘要另含规范化后的 `requested_codes`; 使用 CSV 时还记录 `source_file`, 便于确认本轮实际处理的批次.
 
 实现: `etl/update_funds.py` 负责更新流程, `scripts/update_database.py` 提供命令入口. `api/tushare_client.py` 统一处理限频, 重试和凭证脱敏, `api/fund_fields.py` 维护请求字段, `etl/extract.py` 负责分页和日期分段获取. 复用快照导入的类型转换和数据库 UPSERT, 正式运行不依赖 research 目录.
 

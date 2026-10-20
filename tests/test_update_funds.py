@@ -2,6 +2,9 @@
 
 from datetime import date
 from pathlib import Path
+import json
+import logging
+import sys
 
 import pandas as pd
 import pytest
@@ -166,3 +169,60 @@ def test_missing_announcements_are_saved_separately(tmp_path, missing_count):
         assert db.execute("SELECT count(*) FROM fund_nav WHERE ann_date IS NULL OR accum_nav IS NOT NULL").fetchone()[0] == 0
         if missing_count < 1201:
             assert db.execute("SELECT CAST(adj_nav AS VARCHAR) FROM fund_nav LIMIT 1").fetchone()[0] == "11108.9765000000"
+
+
+def test_update_scope_uses_batch_or_codes_without_touching_other_funds(tmp_path, monkeypatch, caplog):
+    """指定范围只请求目标基金, 重跑幂等, 空清单和未入库代码不会退回全库更新."""
+    from scripts import update_database as command
+
+    path = tmp_path / "scope.duckdb"
+    with connect(path) as db:
+        initialize(db)
+        for code in ("000001.OF", "000002.OF", "000003.OF"):
+            db.execute("INSERT INTO fund_basic(ts_code,name,market,found_date) VALUES (?,?,'O','2020-01-01')", [code, code])
+        db.execute("INSERT INTO fund_nav(ts_code,nav_date,ann_date,unit_nav) VALUES ('000001.OF','2020-01-10','2020-01-11',0.9)")
+    batch = tmp_path / "new_funds.csv"
+    pd.DataFrame({"ts_code": ["000002", " 000002.of ", "000003.OF"]}).to_csv(batch, index=False, encoding="utf-8-sig")
+
+    class FakeSource:
+        def __init__(self):
+            self.codes = []
+
+        def query(self, endpoint, fields, **params):
+            assert endpoint == "fund_nav"
+            assert params["ts_code"] != "000001.OF"
+            self.codes.append(params["ts_code"])
+            return pd.DataFrame([dict(ts_code=params["ts_code"], nav_date="20200110", ann_date="20200111",
+                                      unit_nav="1.2", adj_nav="1.2")], columns=fields.split(","))
+
+    source = FakeSource()
+    monkeypatch.setattr(command, "Source", lambda: source)
+    monkeypatch.setattr(command, "ROOT", tmp_path)
+    common = ["update_database", "--database", str(path), "--datasets", "nav", "--end-date", "2020-01-31"]
+    monkeypatch.setattr(sys, "argv", [*common, "--file", str(batch)])
+    caplog.set_level(logging.INFO)
+    assert command.main() == 0
+    assert source.codes == ["000002.OF", "000003.OF"]
+    assert "更新进度 1/2" in caplog.text and "更新进度 2/2" in caplog.text
+    summary_path = next((tmp_path / "logs").glob("database_update_*.json"))
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["requested_codes"] == ["000002.OF", "000003.OF"]
+    assert summary["source_file"] == str(batch)
+
+    source.codes.clear()
+    monkeypatch.setattr(sys, "argv", [*common, "--codes", "000003", "000003.of"])
+    assert command.main() == 0
+    assert source.codes == ["000003.OF"]
+    with connect(path, read_only=True) as db:
+        assert db.execute("SELECT count(*) FROM fund_nav").fetchone()[0] == 3
+        assert float(db.execute("SELECT unit_nav FROM fund_nav WHERE ts_code='000001.OF'").fetchone()[0]) == 0.9
+
+    source.codes.clear()
+    with pytest.raises(ValueError, match="不在数据库"):
+        update_funds(source, path, codes=["000003", "999999"], datasets=("nav",))
+    with pytest.raises(ValueError, match="不能为空"):
+        update_funds(source, path, codes=[], datasets=("nav",))
+    pd.DataFrame(columns=["ts_code"]).to_csv(batch, index=False)
+    monkeypatch.setattr(sys, "argv", [*common, "--file", str(batch)])
+    assert command.main() == 1
+    assert source.codes == []

@@ -50,10 +50,10 @@ def main() -> int:
             path = log_dir / f"add_funds_{datetime.now():%Y%m%d_%H%M%S_%f}.json"
             path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
             logging.info("批量添加摘要: %s", path)
-            logging.info("请运行 python -m scripts.update_database 更新历史数据; 自定义数据库需传同一 --database")
+            logging.info('请运行 python -m scripts.update_database --file "%s" 更新本批基金; 自定义数据库需传同一 --database', args.csv_path)
             return int(summary["status"] != "completed")
         add_fund(Source(), args.code, args.database)
-        logging.info("完成. 请运行 python -m scripts.update_database 更新历史数据; 自定义数据库需传同一 --database")
+        logging.info("完成. 请运行 python -m scripts.update_database --codes %s 更新该基金; 自定义数据库需传同一 --database", args.code)
         return 0
     except Exception as exc:
         # Source 已对接口异常脱敏, 命令入口记录失败并返回非零状态.
