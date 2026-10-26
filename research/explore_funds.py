@@ -90,7 +90,7 @@ def main() -> int:
     parser.add_argument('--run-dir', type=Path)
     args = parser.parse_args()
     # 默认使用时间戳目录保存独立快照; 显式指定已有目录会覆盖同名输出.
-    folder = args.run_dir or ROOT / 'data' / 'exploration' / datetime.now().strftime('%Y%m%d_%H%M%S')
+    folder = args.run_dir or ROOT / 'data' / 'fund_list' / datetime.now().strftime('%Y%m%d_%H%M%S')
     folder.mkdir(parents=True, exist_ok=True)
     log_dir = ROOT / 'logs'
     log_dir.mkdir(exist_ok=True)

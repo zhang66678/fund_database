@@ -110,7 +110,7 @@ ts_code
 
 ### 从总名单自动生成批次
 
-继续使用同一个入口, `--from-list` 只生成候选清单, 不请求 Tushare, 不读取 Token 或写数据库. 不传路径时, 自动从 `data/exploration/` 下按 `YYYYMMDD_HHMMSS` 快照目录名取最新 `fund_basic_all.csv`, 不按文件修改时间判断:
+继续使用同一个入口, `--from-list` 只生成候选清单, 不请求 Tushare, 不读取 Token 或写数据库. 不传路径时, 自动从 `data/fund_list/` 下按 `YYYYMMDD_HHMMSS` 快照目录名取最新 `fund_basic_all.csv`, 不按文件修改时间判断:
 
 ```powershell
 # 默认选存续场外基金, 最多 20 只, 自动生成时间戳文件名.
@@ -120,7 +120,7 @@ ts_code
 .\.venv\Scripts\python.exe -m scripts.add_fund --from-list --fund-types 股票型 混合型 债券型 --limit 30
 
 # 指定来源快照, 包含已终止基金, 并指定输出文件.
-.\.venv\Scripts\python.exe -m scripts.add_fund --from-list data/exploration/20261019_093730/fund_basic_all.csv --status L D --limit 30 --output data/fund_batches/batch_001.csv
+.\.venv\Scripts\python.exe -m scripts.add_fund --from-list data/fund_list/20261019_093730/fund_basic_all.csv --status L D --limit 30 --output data/fund_batches/batch_001.csv
 ```
 
 - `--status` 默认 `L`, 可同时选 `L`, `D`, `I`; 发行中基金若缺少成立日期则不进入本次清单.
@@ -320,7 +320,7 @@ from pathlib import Path
 from database.csv_repository import CsvFundRepository
 
 nav_path = Path(
-    "data/exploration/20260921_095101/longest_lived/history/20260921_102854/nav.csv"
+    "data/fund_list/20260921_095101/longest_lived/history/20260921_102854/nav.csv"
 )
 repo = CsvFundRepository(nav_path)
 nav = repo.get_nav("000001.OF", date(2020, 1, 1), date(2020, 12, 31))

@@ -77,7 +77,7 @@ def test_prepare_batch_filters_latest_snapshot_and_preserves_database(tmp_path, 
     with connect(path) as db:
         initialize(db)
         db.execute("INSERT INTO fund_basic(ts_code,name) VALUES ('000001.OF','尚无净值的基金')")
-    snapshots = tmp_path / "data/exploration"
+    snapshots = tmp_path / "data/fund_list"
     latest = snapshots / "20261019_093730/fund_basic_all.csv"
     latest.parent.mkdir(parents=True)
     rows = [

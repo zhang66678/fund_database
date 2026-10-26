@@ -15,7 +15,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("code", nargs="?", help="基金代码, 例如 040001 或 040001.OF")
     parser.add_argument("--file", type=Path, dest="csv_path", help="固定批次 CSV, 必须有 ts_code 列")
-    parser.add_argument("--from-list", type=Path, nargs="?", const=ROOT / "data/exploration",
+    parser.add_argument("--from-list", type=Path, nargs="?", const=ROOT / "data/fund_list",
                         help="仅生成批次清单; 不传路径时取最新本地基金名单")
     parser.add_argument("--limit", type=int, help=f"生成清单时最多选几只, 默认 {DEFAULT_BATCH_SIZE}")
     parser.add_argument("--status", nargs="+", choices=("L", "D", "I"), help="筛选存续状态, 默认 L")

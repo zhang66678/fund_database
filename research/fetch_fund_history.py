@@ -110,7 +110,7 @@ def main() -> int:
                         handlers=[logging.StreamHandler(), logging.FileHandler(
                             ROOT / 'logs' / 'fund_history.log', encoding='utf-8')])
     try:
-        folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'exploration')
+        folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'fund_list')
         selected = folder / 'longest_lived' / 'top_10.csv'
         if not selected.exists():
             raise ValueError('请先运行 research.select_longest_funds 生成 top_10.csv')

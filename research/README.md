@@ -43,7 +43,7 @@ Token 不写入代码或输出文件，不调用 `ts.set_token`。不记录原�
 .\.venv\Scripts\python.exe -m research.explore_funds list
 ```
 
-每次执行创建新的 `data/exploration/时间戳/`，不覆盖以前的清单快照。成功后有：
+每次执行创建新的 `data/fund_list/时间戳/`，不覆盖以前的清单快照。成功后有：
 
 - `fund_basic_L.csv`、`fund_basic_D.csv`、`fund_basic_I.csv`：三种状态的清单。
 - `fund_basic_all.csv`：合并清单。
@@ -81,12 +81,12 @@ Token 不写入代码或输出文件，不调用 `ts.set_token`。不记录原�
 .\.venv\Scripts\python.exe -m research.select_longest_funds
 ```
 
-程序按 `data/exploration/YYYYMMDD_HHMMSS/` 的目录时间戳选择最新快照, 要求同时存在 `fund_basic_all.csv` 和 `list_summary.json`. 没有摘要的未完成任务会跳过. 选中后会核对摘要日期, 总行数和状态数量; 数据损坏时失败, 不静默改用旧数据.
+程序按 `data/fund_list/YYYYMMDD_HHMMSS/` 的目录时间戳选择最新快照, 要求同时存在 `fund_basic_all.csv` 和 `list_summary.json`. 没有摘要的未完成任务会跳过. 选中后会核对摘要日期, 总行数和状态数量; 数据损坏时失败, 不静默改用旧数据.
 
 也可以指定某次快照, 复现当时的结果:
 
 ```powershell
-.\.venv\Scripts\python.exe -m research.select_longest_funds --run-dir data/exploration/20260921_095101
+.\.venv\Scripts\python.exe -m research.select_longest_funds --run-dir data/fund_list/20260921_095101
 ```
 
 计算规则:
@@ -123,7 +123,7 @@ Token 不写入代码或输出文件，不调用 `ts.set_token`。不记录原�
 .\.venv\Scripts\python.exe -m research.fetch_fund_history
 ```
 
-程序读取最新完整快照的 `longest_lived/top_10.csv`, 不重新挑选基金. 也可传入 `--run-dir data/exploration/20260921_095101` 固定名单, 或用 `--end-date 2026-09-21` 指定净值和因子截止日期. 默认截止日为运行当天, 数据仍可能有披露延迟.
+程序读取最新完整快照的 `longest_lived/top_10.csv`, 不重新挑选基金. 也可传入 `--run-dir data/fund_list/20260921_095101` 固定名单, 或用 `--end-date 2026-09-21` 指定净值和因子截止日期. 默认截止日为运行当天, 数据仍可能有披露延迟.
 
 净值从各代码的 `found_date` 开始, 按两年窗口请求. 因子和分红复用分页函数, 请求至空页并检查重复页. 某接口失败不影响其他基金, 失败原因写入摘要. 本轮为简单探索程序, 未实现断点续跑; 重跑会重新请求全部历史并生成新的时间戳目录.
 
@@ -160,7 +160,7 @@ Token 不写入代码或输出文件，不调用 `ts.set_token`。不记录原�
 
 ## 历史检查记录与后续步骤
 
-2026-09-16 实测结果（本地快照 `data/exploration/20260916_154011/`）：
+2026-09-16 实测结果（本地快照 `data/fund_list/20260916_154011/`）：
 
 - `L` 25,021 条，`D` 4,276 条，`I` 0 条；合计 29,297 个代码、25 列，无重复代码。
 - 全部代码的 `found_date` 可解析。

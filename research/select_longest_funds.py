@@ -146,7 +146,7 @@ def main() -> int:
                             ROOT / 'logs' / 'fund_selection.log', encoding='utf-8')])
     LOGGER.info('开始筛选最长存续基金')
     try:
-        folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'exploration')
+        folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'fund_list')
         LOGGER.info('使用快照: %s', folder)
         select_snapshot(folder)
     except (OSError, ValueError, KeyError) as exc:

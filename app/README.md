@@ -109,7 +109,7 @@ Stop-Process -Id $demoTunnelId
 显式设置 `NAV_CSV` 会优先切换至 CSV 模式, 例如切回原有 10 基金曲线:
 
 ```powershell
-$env:NAV_CSV = "data/exploration/20260921_095101/longest_lived/history/20260921_102854/nav.csv"
+$env:NAV_CSV = "data/fund_list/20260921_095101/longest_lived/history/20260921_102854/nav.csv"
 ```
 
 以下名称和日历文件配置仅用于 CSV 模式: 相对路径以项目根目录为基准, 也可以使用绝对路径. 名称优先读取净值同目录的 `fund_basic.csv`, 旧目录兼容 `longest_lived/top_10.csv`, 或通过 `FUND_NAMES_CSV` 指定. 下拉框只列出当前数据源有净值的基金, 选项随数据库更新变化.
