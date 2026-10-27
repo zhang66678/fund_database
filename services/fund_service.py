@@ -129,6 +129,8 @@ class FundService:
             "start_date": first.isoformat(), "end_date": last.isoformat(),
             "funds": {code: names.get(code, "名称未提供") for code in codes},
             "cumulative_returns": cumulative, "metrics": metrics, "errors": errors,
+            "fetched_at": min((nav.attrs["fetched_at"] for nav in navs.values()
+                               if nav.attrs.get("fetched_at")), default=None),
         }
 
     def get_details(self, ts_code: str) -> dict:

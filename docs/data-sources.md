@@ -110,7 +110,7 @@
 
 ## iFinD
 
-`ifind_test/` 是 iFinD（同花顺）取数验证，不属于正式流程。已验证：
+页面已接入 iFinD HTTP 查询，侧栏可切换来源。`ifind_test/` 仍是独立 SDK / HTTP 示例，正式页面不依赖测试脚本。已验证：
 
 - Python SDK 登录和 HTTP `refresh_token` 鉴权。
 - 基金资料、日期序列净值、历史净值、公告查询。
@@ -118,11 +118,37 @@
 
 运行方式和指标名见 [iFinD 示例](../ifind_test/README.md)，测试记录见 [TEST_RESULTS](../ifind_test/TEST_RESULTS.md)。
 
-正式接入前需要先确定：
+### 页面配置与请求
 
-- 是否作为 Tushare 的备用源或替代源。
-- 代码、字段、日期和复权口径如何与现有 schema 对齐。
-- 增量更新和失败重试由哪一层负责。
+项目根目录 `.env` 增加：
+
+```dotenv
+IFIND_REFRESH_TOKEN=你的refresh_token
+```
+
+环境变量优先于 `.env`。页面 HTTP 模式不需要 `IFIND_USERNAME`、`IFIND_PASSWORD` 或 SDK；Refresh Token 获取方式见 [独立示例](../ifind_test/README.md)。修改凭证后重启页面服务。
+
+`api/ifind_client.py` 使用 `get_access_token` 获取访问令牌，再请求 `basic_data_service` 和 `cmd_history_quotation`。访问令牌仅保存在当前会话内存；不会调用刷新 Refresh Token 的接口。
+
+成功请求按接口和参数缓存 10 分钟，每会话最多缓存 128 个结果，失败不缓存。超时为 30 秒，错误显示接口及错误码，不显示凭证或原始响应，不自动重试或切换来源。缓存结果保留原始净值获取时间，长历史取各段最早的获取时间。
+
+### 字段映射与范围
+
+| 接口 / 字段 | 用途 / 项目字段 |
+| --- | --- |
+| `ths_fund_short_name_fund` | 基金简称 |
+| `ths_fund_establishment_date_fund` | `found_date`，成立日期 |
+| `netAssetValue` | `unit_nav`，单位净值 |
+| `accumulatedNAV` | `accum_nav`，累计净值 |
+| `adjustedNAV` | `adj_nav`，复权净值 |
+
+净值按最多 3 个自然年分段请求，日期为 `YYYY-MM-DD`，使用 `Interval:D,Fill:Blank`，保留缺失值。不写入现有数据库，也不构造公告日期；HTTP 历史净值返回的当前序列不提供原有 Tushare 公告版本档案。
+
+基金代码沿用六位代码加 `.OF` 的场外基金约定，不合并份额类别。基金候选名单取自本地数据库，名单不代表 iFinD 可查询范围；单基金和对比页均可补充输入其他代码。
+
+投资类型、业绩比较基准、分红、经理和资产暂未接入。`ths_fund_type_fund` 是运作形式，不能直接映射为投资类型。
+
+绩效计算显式复用本地 SSE 日历及现有公式。日期未覆盖或样本不足时提示计算失败，仍可展示原始净值。两源复权方法尚需以分红样本进一步核对，不能要求原始复权数值或计算结果完全相同。页面交互见 [页面说明](../app/README.md#数据源模式)。
 
 ## 官方文档
 

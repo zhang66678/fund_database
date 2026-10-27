@@ -9,14 +9,24 @@ from database.duckdb_repository import DuckDBFundRepository
 from services.fund_service import FundService
 
 
-def create_service() -> FundService:
-    """默认查询 DuckDB, 显式设置 NAV_CSV 时保留 CSV 对照模式."""
+def create_service(source: str = "tushare") -> FundService:
+    """根据页面选择组装服务, iFinD 客户端在浏览器会话内复用."""
+    if source == "ifind":
+        import streamlit as st
+        from api.ifind_client import IfindClient
+        from database.ifind_repository import IfindFundRepository
+
+        path = _database_path()
+        cached = st.session_state.get("_ifind_service")
+        if cached is None or cached[0] != str(path):
+            service = FundService(IfindFundRepository(IfindClient(), DuckDBFundRepository(path)))
+            st.session_state["_ifind_service"] = (str(path), service)
+        return st.session_state["_ifind_service"][1]
+    if source != "tushare":
+        raise ValueError("未知数据源")
     nav_setting = os.environ.get("NAV_CSV")
     if not nav_setting:
-        database_path = Path(os.environ.get("DATABASE_PATH") or DATABASE_PATH)
-        if not database_path.is_absolute():
-            database_path = ROOT / database_path
-        return FundService(DuckDBFundRepository(database_path))
+        return FundService(DuckDBFundRepository(_database_path()))
     path = Path(nav_setting)
     if not path.is_absolute():
         path = ROOT / path
@@ -36,3 +46,8 @@ def create_service() -> FundService:
         path, names_path if names_setting or names_path.is_file() else None,
         calendar_path if calendar_setting or calendar_path.is_file() else None,
     ))
+
+
+def _database_path() -> Path:
+    path = Path(os.environ.get("DATABASE_PATH") or DATABASE_PATH)
+    return path if path.is_absolute() else ROOT / path

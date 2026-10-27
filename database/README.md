@@ -54,7 +54,7 @@
 
 ## 查询
 
-`database/repository.py` 定义 `FundRepository` Protocol，DuckDB 和 CSV 实现遵守相同约定。
+`database/repository.py` 定义 `FundRepository` Protocol，DuckDB、CSV 和 iFinD 查询实现向服务层提供统一格式。iFinD 适配器只在线取数，不创建数据库；其范围和公告版本差异见 [数据源](../docs/data-sources.md#ifind)。
 
 | 方法 | 返回 |
 | --- | --- |

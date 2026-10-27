@@ -1,6 +1,7 @@
 """基金分析页面的原生布局组件, 不直接操作数据库或计算绩效指标."""
 
 from datetime import date
+import os
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -44,6 +45,17 @@ def _edit_code(funds: dict) -> None:
     st.session_state.fund_choice = code if code in funds else None
 
 
+def _change_source() -> None:
+    """数据源切换后清除两页结果和日期, 基金代码与曲线选择继续保留."""
+    for key in ("query_result", "query_feedback", "comparison_result", "comparison_feedback"):
+        st.session_state.pop(key, None)
+    for prefix, draft_key in (("", "draft_query"), ("comparison_", "comparison_draft")):
+        for field in ("custom_start", "custom_end"):
+            key = prefix + field
+            st.session_state.pop(key, None)
+            st.session_state.get(draft_key, {}).pop(key, None)
+
+
 def show_navigation() -> str:
     with st.sidebar:
         with st.container(key="sidebar_brand"):
@@ -52,8 +64,27 @@ def show_navigation() -> str:
         with st.container(key="sidebar_navigation"):
             page = st.radio("导航", ("基金分析", "基金对比", "数据说明"), key="workspace_page", label_visibility="collapsed")
         st.divider()
-        st.caption("本地历史数据查询, 不自动下载新数据.")
+        labels = {"tushare": "本地数据（CSV）" if os.environ.get("NAV_CSV") else "Tushare（本地数据库）",
+                  "ifind": "iFinD（接口查询）"}
+        source = st.radio("数据源", tuple(labels), format_func=labels.get, key="data_source",
+                          on_change=_change_source)
+        if source == "ifind":
+            st.caption("提交查询后在线取数, 相同请求缓存 10 分钟, 不写入数据库.")
+            st.caption("基金选项沿用本地名单, 也可手动输入代码. 绩效使用本地 SSE 日历.")
+        else:
+            st.caption("本地历史数据查询, 不自动下载新数据.")
     return page
+
+
+def show_query_source(result: dict | None) -> None:
+    if result is None:
+        return
+    if result.get("source") == "ifind":
+        fetched = result.get("fetched_at")
+        stamp = "" if not fetched else pd.Timestamp(fetched).tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S")
+        st.caption(f"数据来源: iFinD | 净值获取时间: {stamp}（北京时间） | 计算日历: 本地 SSE")
+    else:
+        st.caption("数据来源: 本地 CSV" if os.environ.get("NAV_CSV") else "数据来源: Tushare（本地数据库）")
 
 
 def show_search(funds: dict) -> str:
@@ -67,7 +98,7 @@ def show_search(funds: dict) -> str:
         select_col, code_col = st.columns([3, 1], gap="medium")
         select_col.selectbox(
             "选择基金", options=list(funds), index=None, key="fund_choice",
-            format_func=lambda code: f"{code}  {funds[code]}", placeholder="按代码或名称选择本地基金",
+            format_func=lambda code: f"{code}  {funds[code]}", placeholder="按代码或名称选择基金",
             on_change=_choose_fund, disabled=not funds,
         )
         code = code_col.text_input(
@@ -119,9 +150,14 @@ def show_date_filters(
             start, end = (st.session_state[key] for key in keys)
         else:
             start, end = range_dates(label, bounds)
-        st.caption(f"本地净值范围: {bounds[0]} 至 {bounds[1]}. 快捷区间以末日为基准, 含两端.")
+        if st.session_state.get("data_source") == "ifind":
+            if label == "全部":
+                start = None  # 接口适配层查询成立日期后确定全历史起点.
+            st.caption("iFinD 按所选日期查询. 快捷区间以今天为基准, 实际净值日期以查询结果为准.")
+        else:
+            st.caption(f"本地净值范围: {bounds[0]} 至 {bounds[1]}. 快捷区间以末日为基准, 含两端.")
     else:
-        st.caption("选择基金后确定可查询的本地净值范围.")
+        st.caption("选择基金后设置查询日期范围.")
     return {"range": label, "start": start, "end": end}
 
 
@@ -155,10 +191,14 @@ def show_overview(result: dict | None) -> None:
                 latest = result["nav"].iloc[-1]
             if result["start"] is not None:
                 st.caption(f"对应净值日期: {_date_text(None if latest is None else latest.nav_date)} | 已提交区间: {result['start']} 至 {result['end']}")
+            elif latest is not None:
+                st.caption(f"实际净值范围: {_date_text(result['nav'].nav_date.iloc[0])} 至 {_date_text(latest.nav_date)}")
             else:
                 st.caption("暂无可确定的净值区间.")
         details = {} if result is None else result["details"]
         basic = details.get("basic") or {}
+        if result is not None and result.get("source") == "ifind":
+            st.caption("iFinD 投资类型和业绩比较基准暂未接入.")
         if "basic" in details.get("errors", {}):
             st.warning(f"基础资料暂不可用: {details['errors']['basic']}")
         date_col, type_col = st.columns(2)
@@ -217,7 +257,7 @@ def show_chart(result: dict | None) -> None:
                 st.caption("收益与回撤存在缺失开市日, 已保留断点; 回撤仅按区间内已观测净值峰值计算.")
         elif result.get("series_error"):
             st.warning(f"收益与回撤曲线暂不可绘制: {result['series_error']}")
-        st.caption(f"当前展示: {result['name']} · {result['code']} | {result['start']} 至 {result['end']}")
+        st.caption(f"当前展示: {result['name']} · {result['code']} | 实际净值日期: {_date_text(nav.nav_date.iloc[0])} 至 {_date_text(nav.nav_date.iloc[-1])}")
     style_chart(figure)
     figure.update_layout(height=560 if has_drawdown else 440)
     figure.update_xaxes(type="date", title_text=None)
@@ -294,7 +334,7 @@ def show_dividends(result: dict | None) -> None:
     with st.container(border=True, key="dividend_panel"):
         st.subheader("分红记录")
         if result is None:
-            st.caption("查询后展示本地分红记录.")
+            st.caption("查询后展示分红记录.")
             return
         details = result["details"]
         if "dividends" in details["errors"]:
@@ -361,7 +401,7 @@ def _show_asset(details: dict | None) -> None:
 def show_details(result: dict | None) -> None:
     details = None if result is None else result["details"]
     if details is not None:
-        st.caption(f"资料对应: {result['name']} · {details['code']}, 采用本地最新资料, 不受净值区间限制.")
+        st.caption(f"资料对应: {result['name']} · {details['code']}, 采用所选来源的当前资料, 不受净值区间限制.")
     with st.container(key="details_row"):
         left, right = st.columns(2, gap="medium")
         with left, st.container(border=True, key="manager_panel"):
@@ -374,17 +414,18 @@ def show_data_notes() -> None:
     st.header("数据说明")
     with st.container(border=True, key="notes_nav"):
         st.subheader("数据范围与净值")
-        st.write("页面读取本地已下载数据, 不提供实时行情, 不自动请求 Tushare. 快捷区间以所选基金的本地最新净值日为基准, 全部范围取实际数据起止日.")
+        st.write("侧栏可切换 Tushare 本地数据库和 iFinD HTTP 接口. 本地模式不请求 Tushare; iFinD 模式在提交查询后取数, 相同请求缓存 10 分钟, 不写入数据库. 切换来源会清除两页旧结果.")
+        st.write("本地快捷区间以最新净值日为基准; iFinD 快捷区间以今天为基准, 全部范围从接口返回的成立日期开始查询. 实际净值日期以结果为准, 不将当天尚未披露的净值视作实时行情.")
         st.write("单位净值, 累计净值和复权单位净值直接使用来源数据. 多条曲线保留原始量级, 缺失值保持断点, 不插值或归一化.")
         st.write("单基金图上方左轴为原始净值, 右轴为区间累计收益率, 下方为回撤. 收益采用区间首个开市日复权净值为基期; 回撤相对所选区间内已观测峰值, 不含区间前历史峰值, 以负百分比展示. 两条派生曲线使用 SSE 开市日, 不填充缺失记录.")
-        st.write("概览中的成立日期, 投资类型和业绩比较基准来自本地当前基金档案, 不按净值区间还原历史资料或历史基准.")
+        st.write("概览资料来自所选来源, 不按净值区间还原历史资料或历史基准. iFinD 首版仅接入简称和成立日期, 投资类型及基准暂未接入; 两源复权方法仍需进一步核对, 不保证指标结果完全一致.")
         st.write("基金对比使用共同开市日的复权净值计算累计收益, 从相同起点的 0% 开始. 原始净值不修改, 中间缺失保留断点, 实际比较区间以结果标注为准.")
     with st.container(border=True, key="notes_metrics"):
         st.subheader("绩效指标")
         st.write("七项指标均通过现有服务按交易日复权净值计算, 不随所选曲线类型变化. 实际计算区间, 样本数, 年化系数, 无风险利率和目标收益率以查询结果中的计算口径为准.")
-        st.write("区间不足一年时保留年化提示. 当前使用 SSE 日历, 特殊基金的交易日适用性仍需单独核查. 缺少有效净值或完整日历时不补造指标.")
+        st.write("区间不足一年时保留年化提示. 两种来源均使用本地 SSE 日历, 缺少或未覆盖查询日期时仅展示净值并提示计算失败. 特殊基金的交易日适用性仍需单独核查.")
     with st.container(border=True, key="notes_details"):
         st.subheader("分红, 经理与资产资料")
         st.write("分红展示本地全部披露, 按除息日和公告日期倒序, 金额按每份派现金额原值展示. 同一事件可能有不同方案进度或公告版本, 不将记录条数当作实际分红次数, 不直接累加各版本金额. 无本地记录不代表从未分红.")
         st.write("同一经理姓名和任期采用最新公告记录, 离任日期未提供不代表仍在任职. 资产展示本地最新披露日期及原始金额, 不假设单位, 不换算为亿元, 不将两种口径相加.")
-        st.write("分红, 经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式暂不提供这三类资料.")
+        st.write("分红, 经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式和 iFinD 首版暂不提供这三类资料, 不自动用其他来源补齐.")

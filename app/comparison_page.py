@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.bootstrap import create_service
-from app.components import METRICS, remember_query, show_date_filters, style_chart
+from app.components import METRICS, choice_code, remember_query, show_date_filters, show_query_source, style_chart
 
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,8 @@ def _common_bounds(service, codes: list[str]) -> tuple[tuple[date, date] | None,
     """仅读取日期控件的共同上下界, 正式对齐仍由服务在提交时执行."""
     if len(codes) < 2:
         return None, None
+    if st.session_state.get("data_source") == "ifind":
+        return (date(1900, 1, 1), date.today()), None
     try:
         spans = []
         for code in codes:
@@ -45,11 +47,13 @@ def _run_comparison(service, conditions: dict, bounds_error: str | None) -> None
             raise ValueError("请至少选择两只不同的基金")
         if bounds_error:
             raise ValueError(bounds_error)
-        if conditions["start"] is None or conditions["end"] is None:
+        all_online = conditions["source"] == "ifind" and conditions["range"] == "全部"
+        if (conditions["start"] is None and not all_online) or conditions["end"] is None:
             raise ValueError("请选择开始日期和结束日期")
         with st.spinner("正在比较基金数据..."):
             result = service.get_comparison(conditions["codes"], conditions["start"], conditions["end"])
         result["conditions"] = {**conditions, "codes": list(conditions["codes"])}
+        result["source"] = conditions["source"]
         st.session_state.comparison_result = result
     except ValueError as exc:
         logger.warning("Comparison rejected: %s", exc)
@@ -70,8 +74,11 @@ def _show_chart(result: dict | None) -> None:
         curve = result["cumulative_returns"]
         requested = result["conditions"]
         st.caption(f"实际比较区间: {result['start_date']} 至 {result['end_date']} | {len(result['funds'])} 只基金 · {len(curve)} 个开市日")
-        if (requested["start"].isoformat(), requested["end"].isoformat()) != (result["start_date"], result["end_date"]):
-            st.caption(f"已提交区间: {requested['start']} 至 {requested['end']}, 按共同覆盖范围内的开市日确定实际区间.")
+        requested_dates = tuple(None if requested[key] is None else requested[key].isoformat()
+                                for key in ("start", "end"))
+        if requested_dates != (result["start_date"], result["end_date"]):
+            start_text = requested["start"] or "成立以来"
+            st.caption(f"已提交区间: {start_text} 至 {requested['end']}, 按共同覆盖范围内的开市日确定实际区间.")
         for index, (code, name) in enumerate(result["funds"].items()):
             figure.add_trace(go.Scatter(
                 x=curve.nav_date, y=curve[code], name=f"{code} {name}", connectgaps=False,
@@ -140,11 +147,11 @@ def show_comparison_page() -> None:
     st.header("基金对比")
     st.caption("多基金选择 · 累计收益对比 · 同区间绩效")
     try:
-        service = create_service()
+        service = create_service(st.session_state.data_source)
         funds = service.list_available_funds()
-    except (ValueError, OSError, UnicodeError):
+    except (ValueError, OSError, UnicodeError) as exc:
         logger.exception("Comparison fund choices unavailable")
-        st.error("无法读取本地基金列表, 请检查数据源配置和数据库初始化状态.")
+        st.error(f"无法读取本地基金列表或所选来源配置: {exc}")
         with st.container(border=True, key="comparison_panel"):
             _show_chart(None)
         return
@@ -159,12 +166,20 @@ def show_comparison_page() -> None:
             format_func=lambda code: f"{code} {funds[code]}", placeholder="按代码或名称选择两只及以上基金",
             on_change=remember_query, args=("codes", "comparison_codes", "comparison_draft"),
         )
-        st.caption("选择至少 2 只本地基金. 时间范围使用所选基金的共同覆盖区间.")
+        if st.session_state.data_source == "ifind":
+            if "comparison_manual_codes" not in st.session_state:
+                st.session_state.comparison_manual_codes = draft.get("manual_codes", "")
+            manual = st.text_input("补充基金代码", key="comparison_manual_codes", placeholder="例如 003349,000001",
+                                   on_change=remember_query, args=("manual_codes", "comparison_manual_codes", "comparison_draft"))
+            extra = [choice_code(code) for code in manual.replace("，", ",").split(",") if code.strip()]
+            codes = list(dict.fromkeys([*codes, *extra]))
+        st.caption("选择至少 2 只基金. 比较时使用所选来源净值的共同覆盖区间.")
     bounds, bounds_error = _common_bounds(service, codes)
     with st.container(border=True, key="comparison_panel"):
         st.subheader("累计收益对比")
         conditions = show_date_filters(bounds, draft_key="comparison_draft", prefix="comparison_")
         conditions["codes"] = list(codes)
+        conditions["source"] = st.session_state.data_source
         note_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
         note_col.caption("基于复权净值, 统一从 0% 开始, 缺失记录不填充.")
         submitted = button_col.button("开始对比", type="primary", width="stretch", key="submit_comparison")
@@ -178,5 +193,6 @@ def show_comparison_page() -> None:
         feedback = st.session_state.get("comparison_feedback")
         if feedback and feedback != bounds_error:
             st.error(f"上次对比未成功: {feedback}")
+        show_query_source(result)
         _show_chart(result)
     _show_performance(result)

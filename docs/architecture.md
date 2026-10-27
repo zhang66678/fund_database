@@ -21,7 +21,7 @@ Tushare Pro
 | --- | --- | --- |
 | `api/` | 数据源请求与异常分类 | 第三方 SDK |
 | `etl/` | 取数、清洗、写入编排 | `api`、`database` |
-| `database/` | 连接、schema、读写 | DuckDB / pandas |
+| `database/` | 连接、schema、读写和在线查询适配 | DuckDB / pandas、iFinD HTTP 客户端 |
 | `services/` | 查询用例、指标、对比 | `database.repository` 的接口 |
 | `app/` | 页面与图表 | `services`、`app` 内部组件 |
 | `scripts/` | 命令行入口 | `etl`、`database`、`api` |
@@ -51,6 +51,7 @@ Tushare Pro
 
 - `DuckDBFundRepository`：默认实现，每次查询打开只读连接。
 - `CsvFundRepository`：对照实现，仅支持净值、名称、日历和基础资料。
+- `IfindFundRepository`：通过 `api.ifind_client` 在线查询基金资料和净值，不入库；本地名单只供代码选择，SSE 日历供现有指标计算。
 
 ### `FundService`
 
@@ -70,13 +71,15 @@ Tushare Pro
 - 控制最小请求间隔，有限重试。
 - 把网络、权限、限频错误分类，并避免凭证进入日志。
 
+`api/ifind_client.py` 负责 HTTP 鉴权、请求、错误提示和 10 分钟内存缓存。`app/bootstrap.py` 根据会话中的数据源选择组装服务，iFinD 客户端在当前浏览器会话复用，页面和服务不直接请求接口。
+
 ## 目录职责
 
 | 目录 | 主要文件 |
 | --- | --- |
-| `api/` | `tushare_client.py`、`fund_fields.py` |
+| `api/` | `tushare_client.py`、`fund_fields.py`、`ifind_client.py` |
 | `etl/` | `extract.py`、`import_snapshot.py`、`add_funds.py`、`update_funds.py` |
-| `database/` | `connection.py`、`schema.py`、`writer.py`、`repository.py`、`duckdb_repository.py`、`csv_repository.py` |
+| `database/` | `connection.py`、`schema.py`、`writer.py`、`repository.py`、`duckdb_repository.py`、`csv_repository.py`、`ifind_repository.py` |
 | `services/` | `fund_service.py`、`fund_metrics.py` |
 | `app/` | `streamlit_app.py`、`comparison_page.py`、`components.py`、`bootstrap.py`、`styles.css` |
 | `scripts/` | `init_database.py`、`add_fund.py`、`update_database.py` |
@@ -89,7 +92,7 @@ Tushare Pro
 | 新增数据表 | `database/schema.py`，同步更新 `etl` 写入和 `FundRepository` |
 | 新增指标 | `services/fund_metrics.py`，页面只负责展示 |
 | 新增页面 | `app/`，通过 `FundService` 取数 |
-| 新增数据源 | 先定义与现有 `Source` 对齐的请求边界，再接入 `etl`；未落地前不提前抽象 |
+| 新增数据源 | HTTP 请求放 `api/`，查询适配实现 `FundRepository`；需要持久化时再接入 `etl/` |
 
 ## 配置与路径
 
@@ -97,7 +100,7 @@ Tushare Pro
 
 - `database/connection.py`：`ROOT`、`DATABASE_PATH`、连接生命周期。
 - `api/tushare_client.py`：项目根目录，用于定位 `.env`。
-- `app/bootstrap.py`：根据 `DATABASE_PATH`、`NAV_CSV` 等环境变量选择实现。
+- `app/bootstrap.py`：根据会话选择及 `DATABASE_PATH`、`NAV_CSV` 等环境变量选择实现。
 
 后续如继续收敛，可合并为一个 `config.py`，统一 `ROOT`、`DATABASE_PATH`、日志目录和日志初始化。
 

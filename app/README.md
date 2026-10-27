@@ -1,6 +1,6 @@
 # 页面说明
 
-页面使用 Streamlit + Plotly，默认读取 DuckDB。指标公式见 [指标与对比](../docs/metrics.md)，数据准备见 [数据流程](../docs/etl.md)。
+页面使用 Streamlit + Plotly，默认读取 DuckDB，可在侧栏切换为 iFinD HTTP 查询。指标公式见 [指标与对比](../docs/metrics.md)，数据准备见 [数据流程](../docs/etl.md)。
 
 ## 启动
 
@@ -89,6 +89,17 @@
 
 默认使用 `data/fund_database.duckdb`，可用 `DATABASE_PATH` 指定其他文件。
 
+侧栏“数据源”同时作用于基金分析和基金对比。选择 iFinD 前，在项目根目录 `.env` 配置 `IFIND_REFRESH_TOKEN`，详见 [数据源](../docs/data-sources.md#ifind)。页面使用 HTTP，不需要安装 SDK。
+
+- 切换来源后清除两个页面的查询结果和自定义日期，保留基金代码和曲线选择。点击“查询”或“开始对比”后才请求 iFinD。
+- iFinD 的基金选择项沿用本地名单；单基金可手动输入代码，对比页可用“补充基金代码”输入逗号分隔的其他代码。
+- iFinD 快捷日期以今天为基准，“全部”从接口返回的成立日期开始；结果显示实际净值日期及原始获取时间。编辑日期和曲线不会自动请求接口。
+- 相同请求在当前浏览器会话缓存 10 分钟，切换页面或来源时可复用；重启服务或新会话会重新取数。修改凭证后重启 Streamlit。
+- iFinD 首版提供简称、成立日期和三种净值，复用现有收益、回撤与绩效计算。投资类型、基准、分红、经理和资产暂未接入，不自动用 Tushare 数据补齐。
+- 计算日历复用 `DATABASE_PATH` 所指数据库中的 SSE 日历；日历不足时净值仍可显示，相关派生曲线和指标提示无法计算。无本地数据库时，仍可手动查询 iFinD 净值。
+
+iFinD 不创建数据库，不修改现有 Tushare 数据。接口错误会显示失败原因并清除本次旧结果。
+
 显式设置 `NAV_CSV` 时切换到 CSV 对照模式：
 
 ```powershell
@@ -112,7 +123,7 @@ Remove-Item Env:NAV_CSV, Env:FUND_NAMES_CSV, Env:CALENDAR_CSV -ErrorAction Silen
 
 | 文件 | 职责 |
 | --- | --- |
-| `bootstrap.py` | 根据环境变量组装 Repository 和 Service |
+| `bootstrap.py` | 根据所选来源及环境变量组装服务，复用会话内 iFinD 客户端 |
 | `streamlit_app.py` | 单基金页面编排、查询调度、会话状态 |
 | `comparison_page.py` | 对比页面编排和独立会话状态 |
 | `components.py` | 导航、搜索、筛选、概览、图表、绩效和资料卡片 |
@@ -124,7 +135,7 @@ Remove-Item Env:NAV_CSV, Env:FUND_NAMES_CSV, Env:CALENDAR_CSV -ErrorAction Silen
 ## 验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_streamlit_app.py tests/test_fund_service.py tests/test_fund_metrics.py -q
+.\.venv\Scripts\python.exe -m pytest tests/test_ifind.py tests/test_streamlit_app.py tests/test_fund_service.py tests/test_fund_metrics.py -q
 ```
 
 页面测试使用临时 DuckDB，覆盖查询、筛选、未提交提示、会话状态、数据缺口、无共同区间和读取失败。

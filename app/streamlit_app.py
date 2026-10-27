@@ -11,7 +11,7 @@ from app.bootstrap import create_service
 from app.comparison_page import show_comparison_page
 from app.components import (
     choice_code, show_chart, show_data_notes, show_details, show_dividends, show_filters,
-    show_navigation, show_overview, show_performance, show_search,
+    show_navigation, show_overview, show_performance, show_search, show_query_source,
 )
 
 
@@ -22,6 +22,9 @@ def _read_bounds(service, code: str) -> tuple[tuple[date, date] | None, str | No
     """通过既有查询接口确定日期控件的合法范围, 不新增数据库接口."""
     if service is None or not code.strip():
         return None, None
+    if st.session_state.get("data_source") == "ifind":
+        # 在线模式编辑条件时不下载净值, 提交后才确定实际返回范围.
+        return (date(1900, 1, 1), date.today()), None
     try:
         nav = service.get_nav(code)
         dates = nav.loc[nav.nav_date.le(pd.Timestamp(date.today())), "nav_date"]
@@ -47,22 +50,25 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
         ):
             raise ValueError("请选择开始日期和结束日期")
         with st.spinner("正在查询基金数据..."):
-            service = service or create_service()
+            service = service or create_service(conditions["source"])
             code, start, end = conditions["code"], conditions["start"], conditions["end"]
             # 始终读取三种净值供概览使用, 绘图仅显示用户选择的曲线.
             nav = service.get_nav(code, start, end)
             details = service.get_details(code)
+            if conditions["source"] == "ifind":
+                funds = service.list_available_funds()
             result = {
                 **conditions, "code": details["code"], "name": funds.get(details["code"], "名称未提供"),
                 "selected": list(conditions["selected"]), "nav": nav,
                 "details": details, "metrics": None, "metrics_error": None,
                 "performance_series": None, "series_error": None,
+                "fetched_at": nav.attrs.get("fetched_at"),
             }
             for dataset, error in details["errors"].items():
                 logger.warning("Fund details unavailable: %s: %s", dataset, error)
             if nav.empty:
                 st.session_state.query_feedback = {
-                    "level": "info", "message": "本地没有该基金在所选日期内的净值数据, 请检查代码和日期范围.",
+                    "level": "info", "message": "所选来源没有该基金在所选日期内的净值数据, 请检查代码和日期范围.",
                 }
             else:
                 if any(field in conditions["selected"] for field in ("cumulative_return", "drawdown")):
@@ -83,7 +89,7 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
     except (OSError, UnicodeError):
         logger.exception("Fund data read failed")
         st.session_state.query_feedback = {
-            "level": "error", "message": "无法读取本地数据, 请检查数据源配置和数据库初始化状态.",
+            "level": "error", "message": "无法读取数据, 请检查所选数据源配置.",
         }
 
 
@@ -111,11 +117,13 @@ def main() -> None:
     st.caption("历史净值 · 绩效分析 · 基金资料")
     service, funds = None, {}
     try:
-        service = create_service()
+        service = create_service(st.session_state.data_source)
         funds = service.list_available_funds()
-    except (ValueError, OSError, UnicodeError):
+    except (ValueError, OSError, UnicodeError) as exc:
         logger.exception("Fund choices unavailable")
         st.warning("基金列表暂不可用, 仍可手动输入代码查询.")
+        if st.session_state.data_source == "ifind":
+            st.warning(str(exc))
 
     if "draft_query" not in st.session_state:
         st.session_state.draft_query = {
@@ -130,6 +138,7 @@ def main() -> None:
         st.subheader("净值与收益走势")
         conditions, submitted = show_filters(bounds)
         conditions["code"] = code
+        conditions["source"] = st.session_state.data_source
         if submitted:
             _run_query(service, funds, conditions, bounds, bounds_error)
         result = st.session_state.get("query_result")
@@ -138,6 +147,7 @@ def main() -> None:
         feedback = st.session_state.get("query_feedback")
         if feedback is not None:
             getattr(st, feedback["level"])(feedback["message"])
+        show_query_source(result)
         show_chart(result)
 
     with overview_area:

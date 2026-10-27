@@ -31,7 +31,7 @@ class FundRepository(Protocol):
         ...
 
     def list_available_funds(self) -> dict[str, str]:
-        """返回本地有净值的代码和名称, 按代码排序, 未知名称使用提示文本."""
+        """返回基金选择项, 按代码排序; 在线来源可沿用本地候选名单."""
         ...
 
     def get_calendar(self) -> pd.DataFrame:

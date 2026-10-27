@@ -272,3 +272,76 @@ def test_comparison_page_handles_gaps_invalid_ranges_and_storage_failure(page, m
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "missing.duckdb"))
     app.run()
     assert traces(app) == [] and any("无法读取本地基金列表" in e.value for e in app.error)
+
+
+def test_source_switch_clears_both_results_preserves_code_and_queries_only_on_submit(page, monkeypatch):
+    from api.ifind_client import IfindClient
+
+    app, _ = page
+    calls = []
+    monkeypatch.setenv("IFIND_REFRESH_TOKEN", "test-token")
+
+    def query(self, endpoint, payload):
+        calls.append(endpoint)
+        if endpoint == "basic_data_service":
+            return {"tables": [{"table": {"ths_fund_short_name_fund": ["iFinD 样本甲"],
+                                          "ths_fund_establishment_date_fund": ["20190101"]}}]}
+        dates = ["2020-01-01", "2020-01-02", "2020-01-03"]
+        values = {"netAssetValue": [2.0, 2.1, 2.2], "accumulatedNAV": [3.0, 3.1, 3.2],
+                  "adjustedNAV": [4.0, 4.1, 4.2]}
+        indices = [i for i, day in enumerate(dates) if payload["startdate"] <= day <= payload["enddate"]]
+        return {"_fetched_at": "2026-10-27T01:00:00+00:00", "tables": [{
+            "thscode": payload["codes"], "time": [dates[i] for i in indices],
+            "table": {key: [items[i] for i in indices] for key, items in values.items()},
+        }]}
+
+    monkeypatch.setattr(IfindClient, "query", query)
+    app.selectbox(key="fund_choice").select("000001.OF").run()
+    app.button(key="submit_query").click().run()
+    assert app.session_state["query_result"]["source"] == "tushare"
+    app.session_state["comparison_result"] = {"old": True}
+    app.radio(key="data_source").set_value("ifind").run()
+    assert traces(app) == [] and calls == []
+    assert app.text_input(key="fund_code").value == "000001.OF"
+    assert "comparison_result" not in app.session_state
+    app.segmented_control(key="time_range").select("自定义").run()
+    app.date_input(key="custom_start").set_value(date(2020, 1, 1)).run()
+    app.date_input(key="custom_end").set_value(date(2020, 1, 3)).run()
+    assert calls == []
+    app.button(key="submit_query").click().run()
+    result = app.session_state["query_result"]
+    assert result["source"] == "ifind" and result["nav"].unit_nav.iloc[0] == 2
+    assert result["name"] == "iFinD 样本甲"
+    assert result["metrics"]["nav_count"] == 3
+    assert any("数据来源: iFinD" in c.value for c in app.caption)
+    assert any("暂未接入" in w.value for w in app.warning)
+    app.segmented_control(key="time_range").select("全部").run()
+    app.button(key="submit_query").click().run()
+    assert len(traces(app)) == 3 and app.session_state["query_result"]["start"] is None
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    app.multiselect(key="comparison_codes").set_value(["000001.OF"]).run()
+    app.text_input(key="comparison_manual_codes").set_value("003349").run()
+    app.segmented_control(key="comparison_time_range").select("自定义").run()
+    app.date_input(key="comparison_custom_start").set_value(date(2020, 1, 1)).run()
+    app.date_input(key="comparison_custom_end").set_value(date(2020, 1, 3)).run()
+    app.button(key="submit_comparison").click().run()
+    assert len(traces(app)) == 2
+    assert app.session_state["comparison_result"]["source"] == "ifind"
+    app.segmented_control(key="comparison_time_range").select("全部").run()
+    app.button(key="submit_comparison").click().run()
+    assert len(traces(app)) == 2 and app.session_state["comparison_result"]["start_date"] == "2020-01-01"
+    app.radio(key="workspace_page").set_value("基金分析").run()
+
+    def fail(*args):
+        raise ValueError("iFinD 测试请求失败")
+
+    monkeypatch.setattr(IfindClient, "query", fail)
+    app.button(key="submit_query").click().run()
+    assert traces(app) == [] and app.session_state["query_result"] is None
+    assert any("iFinD 测试请求失败" in e.value for e in app.error)
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    app.radio(key="data_source").set_value("tushare").run()
+    assert traces(app) == []
+    app.radio(key="workspace_page").set_value("基金分析").run()
+    assert traces(app) == []
+    assert app.text_input(key="fund_code").value == "000001.OF"
