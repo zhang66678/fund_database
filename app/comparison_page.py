@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.bootstrap import create_service
-from app.components import METRICS, choice_code, remember_query, show_date_filters, show_query_source, style_chart
+from app.components import METRICS, choice_code, fund_option_labels, remember_query, show_date_filters, show_query_source, style_chart
 
 
 logger = logging.getLogger(__name__)
@@ -160,10 +160,11 @@ def show_comparison_page() -> None:
     selected = st.session_state.get("comparison_codes", draft["codes"])
     st.session_state.comparison_codes = [code for code in selected if code in funds]
     draft["codes"] = list(st.session_state.comparison_codes)
+    labels = fund_option_labels(funds)
     with st.container(border=True, key="comparison_search"):
         codes = st.multiselect(
             "选择对比基金", options=list(funds), key="comparison_codes", disabled=not funds,
-            format_func=lambda code: f"{code} {funds[code]}", placeholder="按代码或名称选择两只及以上基金",
+            format_func=labels.get, placeholder="按代码或名称选择两只及以上基金",
             on_change=remember_query, args=("codes", "comparison_codes", "comparison_draft"),
         )
         if st.session_state.data_source == "ifind":

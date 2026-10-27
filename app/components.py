@@ -87,18 +87,26 @@ def show_query_source(result: dict | None) -> None:
         st.caption("数据来源: 本地 CSV" if os.environ.get("NAV_CSV") else "数据来源: Tushare（本地数据库）")
 
 
+def fund_option_labels(funds: dict) -> dict[str, str]:
+    """固定会话内每个代码的选择项文本, 避免取数后简称变化使浏览器丢失选择."""
+    labels = st.session_state.setdefault("fund_option_labels", {})
+    for code, name in funds.items():
+        labels.setdefault(code, f"{code}  {name}")
+    return {code: labels[code] for code in funds}
+
+
 def show_search(funds: dict) -> str:
     draft = st.session_state.draft_query
-    if "fund_code" not in st.session_state:
-        st.session_state.fund_code = draft["code"]
-    if "fund_choice" not in st.session_state:
-        code = choice_code(draft["code"])
-        st.session_state.fund_choice = code if code in funds else None
+    # 草稿只由输入回调更新; 页面重绘时用代码恢复控件, 不依赖可能过期的显示名称.
+    st.session_state.fund_code = draft["code"]
+    code = choice_code(draft["code"])
+    st.session_state.fund_choice = code if code in funds else None
+    labels = fund_option_labels(funds)
     with st.container(border=True, key="fund_search"):
         select_col, code_col = st.columns([3, 1], gap="medium")
         select_col.selectbox(
             "选择基金", options=list(funds), index=None, key="fund_choice",
-            format_func=lambda code: f"{code}  {funds[code]}", placeholder="按代码或名称选择基金",
+            format_func=labels.get, placeholder="按代码或名称选择基金",
             on_change=_choose_fund, disabled=not funds,
         )
         code = code_col.text_input(
@@ -345,9 +353,12 @@ def show_dividends(result: dict | None) -> None:
             st.caption("点击查询加载分红记录.")
             return
         if not records:
-            st.info("暂无本地分红记录, 不代表基金从未分红.")
+            st.info("所选来源未返回分红记录, 不代表基金从未分红.")
             return
-        st.caption("按除息日倒序展示本地全部披露, 不受净值区间限制. 同一事件可能有不同方案或公告版本.")
+        if result.get("source") == "ifind":
+            st.caption("iFinD 基金分红报表, 按首次公告日期查询成立以来记录, 不受净值区间限制. 金额为每份分红; 方案进度未提供.")
+        else:
+            st.caption("按除息日倒序展示本地全部披露, 不受净值区间限制. 同一事件可能有不同方案或公告版本.")
         # 折叠列表在卡片内滚动, 保留每条披露, 不累加不同版本的派现金额.
         with st.container(height=340, border=False):
             for index, record in enumerate(records):
@@ -360,20 +371,24 @@ def show_dividends(result: dict | None) -> None:
                     st.caption(f"公告日期: {_date_text(record['ann_date'])} | 方案进度: {progress}")
 
 
-def _show_managers(details: dict | None) -> None:
+def _show_managers(details: dict | None, source: str = "tushare") -> None:
     st.subheader("基金经理")
     if details is None:
-        st.caption("查询后展示本地经理资料.")
+        st.caption("查询后展示经理资料.")
     elif "managers" in details["errors"]:
         st.warning(f"经理资料暂不可用: {details['errors']['managers']}")
     elif not details["managers"]:
-        st.info("暂无本地基金经理资料.")
+        st.info("所选来源未返回基金经理资料.")
     else:
+        if source == "ifind":
+            st.caption("iFinD 历任经理记录, 现任经理补充学历与简历. 接口未提供任职公告日期.")
         st.caption("按任职日期倒序. 离任日期未提供不代表仍在任职.")
         # 多任期列表在卡片内滚动, 避免拉长整个分析页面.
         with st.container(height=340, border=False):
             for index, manager in enumerate(details["managers"]):
                 with st.expander(f"{manager['name']} | 任职 {_date_text(manager['begin_date'])}", expanded=index == 0):
+                    if source == "ifind" and pd.notna(manager.get("position_status")):
+                        st.caption(f"接口任职状态: {manager['position_status']}")
                     st.write(f"任职日期: {_date_text(manager['begin_date'])}")
                     st.write(f"离任日期: {'未提供' if pd.isna(manager['end_date']) else _date_text(manager['end_date'])}")
                     education = "未提供" if pd.isna(manager["edu"]) else manager["edu"]
@@ -381,16 +396,23 @@ def _show_managers(details: dict | None) -> None:
                     st.write("暂无简历." if pd.isna(manager["resume"]) else manager["resume"])
 
 
-def _show_asset(details: dict | None) -> None:
+def _show_asset(details: dict | None, source: str = "tushare") -> None:
     st.subheader("资产信息")
     if details is None:
-        st.caption("查询后展示最新本地资产披露.")
+        st.caption("查询后展示最新资产资料.")
     elif "asset" in details["errors"]:
         st.warning(f"资产资料暂不可用: {details['errors']['asset']}")
     elif details["asset"] is None:
-        st.info("暂无本地资产披露数据.")
+        st.info("所选来源未返回资产资料.")
     else:
         asset = details["asset"]
+        if source == "ifind":
+            st.caption(f"报告期: {_date_text(asset['nav_date'])} | 季度报告披露日期: {_date_text(asset['ann_date'])}")
+            for field, label in (("net_asset", "基金资产净值"), ("total_asset", "基金资产总值")):
+                value = asset.get(field)
+                st.metric(label, "未提供" if pd.isna(value) else f"{value:,.2f}")
+            st.caption("按 iFinD 指标原始金额展示, 单位及份额合并范围待核实. 资产总值包含负债对应资产, 不等于合计资产净值; 两项不可相加.")
+            return
         st.caption(f"资产日期: {_date_text(asset['nav_date'])} | 公告日期: {_date_text(asset['ann_date'])}")
         for field, label in (("net_asset", "资产净值"), ("total_netasset", "合计资产净值")):
             value = asset[field]
@@ -405,9 +427,9 @@ def show_details(result: dict | None) -> None:
     with st.container(key="details_row"):
         left, right = st.columns(2, gap="medium")
         with left, st.container(border=True, key="manager_panel"):
-            _show_managers(details)
+            _show_managers(details, "tushare" if result is None else result.get("source", "tushare"))
         with right, st.container(border=True, key="asset_panel"):
-            _show_asset(details)
+            _show_asset(details, "tushare" if result is None else result.get("source", "tushare"))
 
 
 def show_data_notes() -> None:
@@ -426,6 +448,7 @@ def show_data_notes() -> None:
         st.write("区间不足一年时保留年化提示. 两种来源均使用本地 SSE 日历, 缺少或未覆盖查询日期时仅展示净值并提示计算失败. 特殊基金的交易日适用性仍需单独核查.")
     with st.container(border=True, key="notes_details"):
         st.subheader("分红, 经理与资产资料")
-        st.write("分红展示本地全部披露, 按除息日和公告日期倒序, 金额按每份派现金额原值展示. 同一事件可能有不同方案进度或公告版本, 不将记录条数当作实际分红次数, 不直接累加各版本金额. 无本地记录不代表从未分红.")
+        st.write("分红按除息日和公告日期倒序, 金额按每份派现金额展示. Tushare 保留本地全部披露; iFinD 按首次公告日期查询成立以来的分红事件, 未提供方案进度. 不将记录条数当作实际分红次数, 不直接累加各版本金额. 未返回记录不代表从未分红.")
         st.write("同一经理姓名和任期采用最新公告记录, 离任日期未提供不代表仍在任职. 资产展示本地最新披露日期及原始金额, 不假设单位, 不换算为亿元, 不将两种口径相加.")
-        st.write("分红, 经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式和 iFinD 首版暂不提供这三类资料, 不自动用其他来源补齐.")
+        st.write("iFinD 经理履历提供姓名、任职起止日和明确的任职状态, 现任经理补充学历与简历, 未提供任职公告日期. iFinD 资产按同一最新报告期读取资产净值和资产总值, 并单独标注季度报告披露日期; 总资产不映射为 Tushare 合计资产净值.")
+        st.write("分红, 经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式暂不提供这三类资料, 不自动用其他来源补齐.")

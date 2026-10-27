@@ -23,9 +23,26 @@ def http(monkeypatch):
         if endpoint == "get_access_token":
             data = {"errorcode": 0, "data": {"access_token": "test-access-token"}}
         elif endpoint == "basic_data_service":
+            items = json.get("indipara") or [{"indicator": "ths_fund_short_name_fund", "indiparams": []}]
+            rank = int(items[0]["indiparams"][1]) if items[0]["indicator"] == "ths_service_start_fund" else 1
+            values = {
+                "ths_fund_short_name_fund": "接口样本", "ths_fund_establishment_date_fund": "20260921",
+                "ths_fund_manager_current_fund": "经理甲,经理乙",
+                "ths_fund_manager_his_fund": "经理旧(20260921-20260922) 经理甲(20260922-至今) 经理乙(20260923-至今)",
+                "ths_service_start_fund": "经理乙(2026-09-23)" if rank == 1 else "经理甲(2026-09-22)",
+                "ths_education_fund": "硕士" if rank == 1 else "博士",
+                "ths_resume_fund": "经理乙简历" if rank == 1 else "经理甲简历",
+                "ths_latest_rp_fund": "20260630", "ths_fanv_fund": 100,
+                "ths_fatv_fund": 120, "ths_quarterly_report_dd_fund": "20260721",
+            }
             data = {"errorcode": 0, "tables": [{"thscode": json["codes"], "table": {
-                "ths_fund_short_name_fund": ["接口样本"],
-                "ths_fund_establishment_date_fund": ["20260921"],
+                item["indicator"]: [values[item["indicator"]]] for item in items
+            }}]}
+        elif endpoint == "data_pool":
+            data = {"errorcode": 0, "tables": [{"table": {
+                "jydm": [json["functionpara"]["jjlb"]], "p04925_f010": ["2026/09/22"],
+                "p04925_f004": ["2026/09/23"], "p04925_f003": ["2026/09/23"],
+                "p04925_f002": ["--"], "p04925_f001": ["0.05"],
             }}]}
         else:
             data = {"errorcode": 0, "tables": [{"thscode": json["codes"],
@@ -64,7 +81,7 @@ def test_http_data_feeds_existing_metrics_and_cache_preserves_missing_values(htt
     details = service.get_details("003349")
     assert details["basic"]["found_date"] == pd.Timestamp("2026-09-21")
     assert pd.isna(details["basic"]["fund_type"])
-    assert set(details["errors"]) == {"asset", "managers", "dividends"}
+    assert details["errors"] == {}
     assert service.list_available_funds()["003349.OF"] == "接口样本"
 
 
@@ -134,3 +151,57 @@ def test_empty_result_keeps_nav_schema_and_calendar_failure_does_not_block_nav(h
     monkeypatch.setattr(client, "query", lambda *args: {"tables": [], "_fetched_at": "2026-10-27T01:00:00+00:00"})
     nav = service.get_nav("003349", start, end)
     assert nav.empty and nav.columns.tolist() == ["nav_date", "unit_nav", "accum_nav", "adj_nav"]
+
+
+def test_details_align_manager_profiles_dates_and_asset_meanings(http):
+    service = FundService(IfindFundRepository(IfindClient(), Reference()))
+    details = service.get_details("003349")
+    assert details["errors"] == {}
+    managers = details["managers"]
+    assert [m["name"] for m in managers] == ["经理乙", "经理甲", "经理旧"]
+    assert [m["edu"] for m in managers[:2]] == ["硕士", "博士"]
+    assert managers[0]["resume"] == "经理乙简历"
+    assert managers[0]["position_status"] == "现任" and pd.isna(managers[0]["end_date"])
+    assert managers[-1]["end_date"] == pd.Timestamp("2026-09-22")
+    assert pd.isna(managers[-1]["resume"]) and all(pd.isna(m["ann_date"]) for m in managers)
+    asset = details["asset"]
+    assert asset["nav_date"] == pd.Timestamp("2026-06-30")
+    assert asset["ann_date"] == pd.Timestamp("2026-07-21")
+    assert asset["net_asset"] == 100 and asset["total_asset"] == 120
+    assert pd.isna(asset["total_netasset"])  # 总资产不冒充合计净资产.
+    dividend = details["dividends"][0]
+    assert dividend["ann_date"] == pd.Timestamp("2026-09-22")
+    assert dividend["ex_date"] == dividend["record_date"] == pd.Timestamp("2026-09-23")
+    assert dividend["div_cash"] == 0.05 and pd.isna(dividend["pay_date"])
+    assert pd.isna(dividend["div_proc"])
+    assert next(payload for name, payload in http if name == "data_pool")["functionpara"]["dtype"] == "2"
+
+
+def test_one_detail_failure_does_not_replace_it_with_reference_data(http, monkeypatch):
+    client = IfindClient()
+    query = client.query
+
+    def fail_dividends(endpoint, payload):
+        if endpoint == "data_pool":
+            raise ValueError("iFinD 分红接口权限不足")
+        return query(endpoint, payload)
+
+    monkeypatch.setattr(client, "query", fail_dividends)
+    details = FundService(IfindFundRepository(client, Reference())).get_details("003349")
+    assert set(details["errors"]) == {"dividends"}
+    assert details["dividends"] == [] and len(details["managers"]) == 3
+    assert details["asset"]["net_asset"] == 100
+
+
+@pytest.mark.parametrize("message,empty", [("no data.", True), ("permission denied", False)])
+def test_report_empty_result_is_distinct_from_failure(http, monkeypatch, message, empty):
+    client = IfindClient()
+    client.query("basic_data_service", {"codes": "003349.OF", "indipara": []})
+    monkeypatch.setattr("api.ifind_client.requests.post", lambda *args, **kwargs: SimpleNamespace(
+        raise_for_status=lambda: None, json=lambda: {"errorcode": -4001, "errmsg": message},
+    ))
+    if empty:
+        assert client.query("data_pool", {})["tables"] == []
+    else:
+        with pytest.raises(ValueError, match="-4001"):
+            client.query("data_pool", {})

@@ -77,7 +77,7 @@ def test_search_pending_changes_and_navigation_preserve_results(page):
     assert app.session_state["query_result"]["code"] == "000002.OF"
     assert any(m.value == "**投资类型:** 暂无数据" for m in app.markdown)
     assert any(m.value == "**业绩比较基准:** 暂无数据" for m in app.markdown)
-    assert any("暂无本地分红记录" in item.value for item in app.info)
+    assert any("所选来源未返回分红记录" in item.value for item in app.info)
     # 热更新前保存的查询结果可能尚无分红字段, 页面应提示重新查询.
     app.session_state["query_result"]["details"].pop("dividends")
     app.run()
@@ -204,6 +204,55 @@ def test_quick_ranges_use_local_last_date_and_handle_leap_year():
     assert range_dates("近1年", (date(2024, 2, 1), bounds[1])) == (date(2024, 2, 1), bounds[1])
 
 
+def test_ifind_name_update_preserves_fund_when_changing_quick_range(page, monkeypatch):
+    app, _ = page
+
+    class Service:
+        def __init__(self):
+            self.name = "本地基金简称"
+
+        def list_available_funds(self):
+            return {"000001.OF": self.name}
+
+        def get_nav(self, code, start=None, end=None):
+            return pd.DataFrame({"nav_date": pd.date_range(end - pd.Timedelta(days=2), end),
+                                 "unit_nav": [1.0, 1.1, 1.2], "accum_nav": [1.0, 1.1, 1.2],
+                                 "adj_nav": [1.0, 1.1, 1.2]})
+
+        def get_details(self, code):
+            self.name = "iFinD 返回的基金简称"
+            return {"code": code, "basic": None, "managers": [], "asset": None,
+                    "dividends": [], "errors": {}}
+
+        def get_metrics(self, *args):
+            raise ValueError("此测试只验证基金选择和查询日期")
+
+    service = Service()
+    monkeypatch.setattr("app.bootstrap.create_service", lambda source: service)
+    app.radio(key="data_source").set_value("ifind").run()
+    app.selectbox(key="fund_choice").select("000001.OF").run()
+    app.multiselect(key="nav_types").set_value(["unit_nav"]).run()
+    original_label = app.selectbox(key="fund_choice").options[0]
+    assert app.segmented_control(key="time_range").value == "近1年"
+    app.button(key="submit_query").click().run()
+    first = app.session_state["query_result"]
+    assert first["name"] == "iFinD 返回的基金简称" and not first["nav"].empty
+    app.segmented_control(key="time_range").select("近3年").run()
+    # 浏览器以显示文本提交选择值, 简称更新不能改变已选项的提交值.
+    assert app.selectbox(key="fund_choice").options[0] == original_label
+    assert app.selectbox(key="fund_choice").value == "000001.OF"
+    assert app.text_input(key="fund_code").value == "000001.OF"
+    app.button(key="submit_query").click().run()
+    assert not app.exception and not app.error
+    result = app.session_state["query_result"]
+    assert result["code"] == "000001.OF" and not result["nav"].empty
+    assert result["start"] < first["start"] and result["range"] == "近3年"
+    # 用户主动清空代码仍然生效, 不把旧查询的基金强行恢复回来.
+    app.text_input(key="fund_code").set_value("").run()
+    assert app.selectbox(key="fund_choice").value is None
+    assert app.session_state["draft_query"]["code"] == ""
+
+
 def test_comparison_page_multi_fund_dates_and_navigation(page):
     app, path = page
     with connect(path) as db:
@@ -284,8 +333,21 @@ def test_source_switch_clears_both_results_preserves_code_and_queries_only_on_su
     def query(self, endpoint, payload):
         calls.append(endpoint)
         if endpoint == "basic_data_service":
-            return {"tables": [{"table": {"ths_fund_short_name_fund": ["iFinD 样本甲"],
-                                          "ths_fund_establishment_date_fund": ["20190101"]}}]}
+            values = {
+                "ths_fund_short_name_fund": "iFinD 样本甲", "ths_fund_establishment_date_fund": "20190101",
+                "ths_fund_manager_current_fund": "接口经理", "ths_fund_manager_his_fund": "接口经理(20190101-至今)",
+                "ths_service_start_fund": "接口经理(2019-01-01)", "ths_education_fund": "硕士",
+                "ths_resume_fund": "接口经理简历", "ths_latest_rp_fund": "20260930",
+                "ths_fanv_fund": 200, "ths_fatv_fund": 250, "ths_quarterly_report_dd_fund": "20261027",
+            }
+            return {"tables": [{"table": {item["indicator"]: [values[item["indicator"]]] for item in payload["indipara"]}}]}
+        if endpoint == "data_pool":
+            params = payload["functionpara"]
+            if not params["sdate"] <= "20200102" <= params["edate"]:
+                return {"tables": []}
+            return {"tables": [{"table": {"jydm": [params["jjlb"]], "p04925_f010": ["2020/01/02"],
+                "p04925_f004": ["2020/01/03"], "p04925_f003": ["2020/01/03"],
+                "p04925_f002": ["2020/01/06"], "p04925_f001": ["0.07"]}}]}
         dates = ["2020-01-01", "2020-01-02", "2020-01-03"]
         values = {"netAssetValue": [2.0, 2.1, 2.2], "accumulatedNAV": [3.0, 3.1, 3.2],
                   "adjustedNAV": [4.0, 4.1, 4.2]}
@@ -314,7 +376,12 @@ def test_source_switch_clears_both_results_preserves_code_and_queries_only_on_su
     assert result["name"] == "iFinD 样本甲"
     assert result["metrics"]["nav_count"] == 3
     assert any("数据来源: iFinD" in c.value for c in app.caption)
-    assert any("暂未接入" in w.value for w in app.warning)
+    assert result["details"]["errors"] == {}
+    assert result["details"]["dividends"][0]["div_cash"] == 0.07
+    assert result["details"]["managers"][0]["name"] == "接口经理"
+    assert next(m.value for m in app.metric if m.label == "基金资产总值") == "250.00"
+    assert any("0.07 元/份" in e.label for e in app.expander)
+    assert any("接口经理简历" in m.value for m in app.markdown)
     app.segmented_control(key="time_range").select("全部").run()
     app.button(key="submit_query").click().run()
     assert len(traces(app)) == 3 and app.session_state["query_result"]["start"] is None

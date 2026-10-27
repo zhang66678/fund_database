@@ -36,6 +36,9 @@ class IfindClient:
             raise ValueError(f"iFinD {endpoint} 请求失败, 请检查网络和接口服务") from None
         if not isinstance(data, dict) or "errorcode" not in data:
             raise ValueError(f"iFinD {endpoint} 返回格式异常")
+        if endpoint == "data_pool" and data["errorcode"] == -4001 and data.get("errmsg") == "no data.":
+            # 专题报表没有匹配记录时返回此码, 与权限、参数错误分别处理.
+            return {"errorcode": 0, "tables": []}
         if data["errorcode"] != 0:
             # 原始错误和响应可能携带账号信息, 页面仅显示接口和错误码.
             raise ValueError(f"iFinD {endpoint} 错误码 {data['errorcode']}, 请检查凭证、权限或请求参数")

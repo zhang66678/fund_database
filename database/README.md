@@ -66,6 +66,8 @@
 | `get_assets(code)` | 资产披露，按净值日期升序 |
 | `get_dividends(code)` | 分红披露，按除息日、公告日倒序 |
 
+iFinD 经理返回中附带 `position_status`，任职公告日期保持缺失，学历与简历仅补充现任经理。iFinD 资产返回中附带 `total_asset`（资产总值），不写入含义不同的 `total_netasset`；页面分别标注报告期与季度报告披露日期。字段和参数统一见 [iFinD 数据源](../docs/data-sources.md#ifind)。
+
 约定：
 
 - 日期区间包含两端，任意一端可省略。

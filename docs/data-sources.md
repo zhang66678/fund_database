@@ -128,7 +128,7 @@ IFIND_REFRESH_TOKEN=你的refresh_token
 
 环境变量优先于 `.env`。页面 HTTP 模式不需要 `IFIND_USERNAME`、`IFIND_PASSWORD` 或 SDK；Refresh Token 获取方式见 [独立示例](../ifind_test/README.md)。修改凭证后重启页面服务。
 
-`api/ifind_client.py` 使用 `get_access_token` 获取访问令牌，再请求 `basic_data_service` 和 `cmd_history_quotation`。访问令牌仅保存在当前会话内存；不会调用刷新 Refresh Token 的接口。
+`api/ifind_client.py` 使用 `get_access_token` 获取访问令牌，再请求 `basic_data_service`、`cmd_history_quotation` 和 `data_pool`。访问令牌仅保存在当前会话内存；不会调用刷新 Refresh Token 的接口。
 
 成功请求按接口和参数缓存 10 分钟，每会话最多缓存 128 个结果，失败不缓存。超时为 30 秒，错误显示接口及错误码，不显示凭证或原始响应，不自动重试或切换来源。缓存结果保留原始净值获取时间，长历史取各段最早的获取时间。
 
@@ -146,7 +146,52 @@ IFIND_REFRESH_TOKEN=你的refresh_token
 
 基金代码沿用六位代码加 `.OF` 的场外基金约定，不合并份额类别。基金候选名单取自本地数据库，名单不代表 iFinD 可查询范围；单基金和对比页均可补充输入其他代码。
 
-投资类型、业绩比较基准、分红、经理和资产暂未接入。`ths_fund_type_fund` 是运作形式，不能直接映射为投资类型。
+投资类型和业绩比较基准暂未接入。`ths_fund_type_fund` 是运作形式，不能直接映射为投资类型。
+
+### 分红记录
+
+使用官方“基金分红”报表 `p04925`，通过 `data_pool` 请求。参数 `jjlb` 为完整基金代码，`sdate/edate` 为 `YYYYMMDD`，`dtype="2"` 按首次公告日期查询。从成立日期开始，按最多 3 个自然年分段读取，不受页面净值区间限制。
+
+| 返回字段 | 页面字段 / 含义 |
+| --- | --- |
+| `jydm` | 基金代码，用于核对返回归属 |
+| `p04925_f001` | `div_cash`，基金单位分红，按元/份展示 |
+| `p04925_f010` | `ann_date`，首次公告日期 |
+| `p04925_f004` | `ex_date`，除息日 |
+| `p04925_f003` | `record_date`，权益登记日 |
+| `p04925_f002` | `pay_date`，红利发放日 |
+
+报表未提供方案进度，`div_proc` 保持缺失，不自行标记为实施。不把各记录金额直接累加。专题报表明确返回 `errorcode=-4001, errmsg="no data."` 时按该段无记录处理；其他接口错误继续显示失败，不将无记录解释为基金从未分红。
+
+### 经理任职
+
+`ths_fund_manager_his_fund` 返回带任期的历任名单，如 `姓名(20161026-20170123)` 或 `姓名(20260826-至今)`；按原始任期拆分，不合并同名经理的不同任期。`position_status` 取自明确的“至今”标记，不根据空离任日期推断在任。接口未提供任职公告日期，`ann_date` 保持缺失。
+
+`ths_fund_manager_current_fund` 提供现任名单。对现任经理，使用下列指标按任职状态 `100`、任职年化回报排名 `1..10` 查询，返回姓名与任职起始日匹配后补充学历、简历，不按名单顺序拼接：
+
+| 指标 | 参数 / 用途 |
+| --- | --- |
+| `ths_service_start_fund` | `["100", 排名, "100"]`，带姓名的任职起始日 |
+| `ths_education_fund` | `["100", 排名, "101"]`，学历 |
+| `ths_resume_fund` | `["100", 排名, "101"]`，简历 |
+
+历史离任经理展示任职记录，未补充其学历、简历；现任资料排名最多支持 10 位。
+
+### 资产信息
+
+先用 `ths_latest_rp_fund`，参数 `[查询当天, "1"]`，确定最新季度报告期；再以这个明确报告期查询金额，不将两次“最新一期”的潜在不同结果拼接。
+
+| 指标 | 参数 / 用途 |
+| --- | --- |
+| `ths_fanv_fund` | `[报告期YYYYMMDD]` → `net_asset`，基金资产净值 |
+| `ths_fatv_fund` | `[报告期YYYYMMDD]` → `total_asset`，基金资产总值 |
+| `ths_quarterly_report_dd_fund` | `[年份, 季度1..4]` → 季度报告披露日期 |
+
+资产报告期记为 `nav_date`，季度报告披露日期记为 `ann_date` 并在页面用原指标名称标注。缺失金额、日期保持缺失。`total_asset` 是总资产，不能映射为 Tushare 的 `total_netasset`（合计资产净值）；后者在 iFinD 返回中为空。当前按指标原始金额展示，单位与份额合并范围仍需独立核实。
+
+上述指标通过 [同花顺官方 API 参考资料](https://quantapi.51ifind.com/ds_service_basic/skills/download/ifind-supercommand/ifind-data-api) 的指标搜索及参数字典核实；分红报表字段按官方超级命令的“基金专题 → 市场概况 → 基金分红”配置及 HTTP 返回 `outParams` 核实。[官方超级命令](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/super-command-web/index.html)
+
+2026-10-27 实测：`003349.OF` 返回 8 条分红、5 位历任经理及最新资产数据；`000001.OF` 返回 25 条分红、17 位历任经理及最新资产净值，其资产总值和季报披露日期未返回，页面保持缺失。此记录说明样本接口可用，不表示各基金数据完整性相同。
 
 绩效计算显式复用本地 SSE 日历及现有公式。日期未覆盖或样本不足时提示计算失败，仍可展示原始净值。两源复权方法尚需以分红样本进一步核对，不能要求原始复权数值或计算结果完全相同。页面交互见 [页面说明](../app/README.md#数据源模式)。
 

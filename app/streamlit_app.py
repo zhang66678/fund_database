@@ -130,7 +130,6 @@ def main() -> None:
             "code": "", "range": "近1年", "selected": ["unit_nav", "cumulative_return", "drawdown"],
         }
     code = show_search(funds)
-    st.session_state.draft_query["code"] = code
     bounds, bounds_error = _read_bounds(service, code)
     # 概览位置在图表前, 但内容在处理本次提交后写入, 避免显示上一轮结果.
     overview_area = st.container()
