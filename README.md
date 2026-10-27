@@ -1,350 +1,91 @@
-# 公募基金本地数据库与可视化系统
+# 公募基金数据库与分析系统
 
-基于 Tushare Pro 的基金数据研究项目。第一阶段面向 Windows 本地单机使用，逐步实现历史数据存储、增量更新、查询分析与可视化。
+本地单机的公募基金研究项目：从 Tushare Pro 采集场外基金数据，存入 DuckDB，计算收益与风险指标，并通过 Streamlit + Plotly 展示。
 
-## 当前状态
+项目面向个人研究与本地演示，不提供实时行情，不自动发现新基金，也不包含多人部署或任务调度。
 
-已建立 API 请求封装、DuckDB 数据库、数据导入与增量更新流程，以及基金查询和可视化页面。当前逐步完善正式分层模块，集中配置仍待后续整理。
-
-[场外基金数据探索](research/README.md) 保留基金清单获取、最长存续 10 个代码筛选和样本历史数据调研。共用请求封装与字段已移入 `api/`，分页和日期分段获取已移入 `etl/extract.py`。正式程序不依赖 `research/`，探索脚本复用正式模块。
-
-- 开发环境：Windows、VS Code、Python 虚拟环境 `.venv`。
-- 当前环境 Python 版本：3.14.3。后续新增依赖时逐项验证兼容性。
-- `requirements.txt` 记录当前阶段直接依赖及已安装版本，不是完整的传递依赖锁文件。
-- 已安装第一阶段依赖：Tushare、Pandas、DuckDB、python-dotenv 和 pytest，并验证基本导入、配置解析与内存数据库查询。
-- 已增加 Streamlit 和 Plotly, 用于本地净值曲线 demo.
-
-## 本地环境
-
-在项目根目录的 PowerShell 中，可直接使用虚拟环境解释器，无需依赖终端是否已激活：
+## 快速开始
 
 ```powershell
-.\.venv\Scripts\python.exe --version
-.\.venv\Scripts\python.exe -m pip check
-```
-
-在新电脑上准备环境时，先创建虚拟环境并安装当前阶段依赖：
-
-```powershell
+# 1. 安装依赖
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
 
-项目根目录的 `.env` 用于保存 `TUSHARE_TOKEN`。已有文件应保留；不要将真实 Token 写入代码、日志、截图或 Git。`api/tushare_client.py` 优先使用环境变量，否则加载项目根目录的 `.env`。
-
-新电脑首次使用时，先建空库，再添加基金并获取数据：
-
-```powershell
+# 2. 在项目根目录创建 .env，写入 TUSHARE_TOKEN
+# 3. 建库（不需要 Token）
 .\.venv\Scripts\python.exe -m scripts.init_database
-.\.venv\Scripts\python.exe -m scripts.add_fund 000001.OF
-.\.venv\Scripts\python.exe -m scripts.update_database
-```
 
-仅建库不需要 Token，后续数据获取需要配置 Token 和相应接口权限。`update_database` 统一更新基础资料、净值、分红、基金经理、资产及交易日历。已有单基金快照时，可用 `scripts.init_database --snapshot 快照目录` 直接建库并导入。数据库和快照不随 Git 克隆，详细说明见 [数据库说明](database/README.md)。
+# 4. 添加基金并下载历史数据（需要 Token）
+.\.venv\Scripts\python.exe -m scripts.add_fund 000001
+.\.venv\Scripts\python.exe -m scripts.update_database --codes 000001
 
-更新时不指定条目即更新全部，也可通过 `--datasets` 选择一项或多项：
-
-```powershell
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets asset
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav asset
-```
-
-支持 `basic`、`nav`、`dividend`、`manager`、`asset`、`calendar`。`--full-history`、`--refresh-days` 和 `--end-date` 可与条目选择组合使用。
-
-## 可视化 demo 进度
-
-已完成 DuckDB 数据访问层, `FundService` 服务层和 Streamlit + Plotly 页面, 可查询净值曲线和七项收益风险指标. 已建立单基金数据库并导入基础资料, 净值, 分红及交易日历, 支持重复导入和事务回滚. 页面默认查询 DuckDB, CSV 模式保留用于对照. 详见 [页面启动与使用说明](app/README.md) 和 [数据库说明](database/README.md).
-
-在项目根目录启动:
-
-```powershell
+# 5. 启动页面
 .\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
 ```
 
-## 分层约定
+更新数据库前请停止 Streamlit，避免 DuckDB 文件写锁冲突。更多命令和失败处理见 [数据流程](docs/etl.md)。
 
-数据流：Tushare Pro → API → ETL → DuckDB → Service → Streamlit + Plotly。
+## 文档索引
 
-| 模块（按需创建） | 职责 |
+| 想了解 | 文档 |
 | --- | --- |
-| `config/` | 集中配置、环境变量加载和日志配置 |
-| `api/` | 数据请求、限频、重试与请求异常处理 |
-| `etl/` | 提取、清洗、质量检查和调用数据库层加载数据 |
-| `database/` | 连接、schema、参数化查询、事务与 UPSERT |
-| `services/` | 查询用例、收益和风险指标、图表数据整理 |
-| `app/` | 用户交互、页面布局与图表展示 |
-| `scripts/` | 历史初始化与日常更新入口 |
-| `tests/` | 关键行为和金融指标验证 |
+| 分层、依赖方向、目录职责 | [架构说明](docs/architecture.md) |
+| 添加基金、增量更新、批次、快照导入 | [数据流程](docs/etl.md) |
+| 净值、收益、回撤、七项指标与对比口径 | [指标与对比](docs/metrics.md) |
+| Tushare 接口、字段、权限与 iFinD 验证 | [数据源](docs/data-sources.md) |
+| 环境、测试、编码与维护约定 | [开发约定](docs/development.md) |
+| 页面功能、交互与图表样式 | [页面说明](app/README.md) |
+| 表结构、UPSERT、查询约定 | [数据库说明](database/README.md) |
+| 探索脚本与历史报告 | [研究说明](research/README.md) |
+| iFinD 调用示例 | [iFinD 示例](ifind_test/README.md) |
 
-页面通过服务层使用数据，不直接调用 Tushare 或操作数据库。服务层避免依赖 DuckDB 专有实现；未来迁移 PostgreSQL 时，尽量将变化限制在数据库层。当前不引入服务器框架或多人部署组件。
+## 架构
 
-## 数据维护原则
-
-- 保留当前与历史基金，基金终止只改变状态，不删除历史数据。
-- 先调研接口，再确定业务表、主键和字段类型。
-- 使用主键或唯一约束配合 UPSERT，保证重复运行不会产生重复记录。
-- 历史回填需逐步支持失败重试、断点续跑和独立任务状态。
-- 增量更新使用可配置的滚动窗口，同时考虑新基金与状态变化。窗口外历史修订需要后续补查机制，不能假设短窗口覆盖所有修订。
-- 数据、日志与密钥留在本地，代码和文档进入版本管理。
-
-## 开发顺序
-
-1. Phase 1：配置、日志、Tushare 客户端和 DuckDB 连接；先验证最小基础能力。
-2. Phase 2：调研基金接口的字段、历史覆盖、权限、频率和返回限制。
-3. Phase 3：少量核心数据的获取、清洗与入库 MVP。
-4. Phase 4–5：历史回填与增量更新。
-5. Phase 6–7：业务指标与可视化。
-6. Phase 8：持续完善测试、文档、错误处理和性能。
-
-每个阶段先检查现状、说明修改范围，完成后验证并等待确认，再进入下一阶段。重要测试随功能加入，不集中拖到最后。
-
-## Git 与本地文件
-
-`.gitignore` 已覆盖虚拟环境、真实环境配置、Python 缓存、数据库、数据目录、日志和编辑器设置。忽略规则不会自动移除已经被 Git 跟踪的文件。
-
-本地 Git 仓库已初始化，默认分支为 `main`，尚未创建首次提交或配置远程仓库。安装 Git 后，如果现有终端仍无法识别 `git`，请重新启动 VS Code，使终端获取新的 PATH。可在项目根目录检查状态：
-
-```powershell
-git --version
-git check-ignore .env .venv/ .vscode/ data/ logs/
-git status --short --untracked-files=all
+```mermaid
+flowchart LR
+    A[Tushare Pro] --> B[api<br/>请求与重试]
+    B --> C[etl<br/>清洗与编排]
+    C --> D[(DuckDB)]
+    D --> E[database<br/>Repository]
+    E --> F[services<br/>查询与指标]
+    F --> G[app<br/>Streamlit + Plotly]
 ```
 
-确认敏感文件与本地数据没有出现在待提交列表后，再明确添加代码和文档。不要提交 `.env`、数据库文件或日志。
-
-## Tushare公募基金数据接口
-
-当前程序使用 `fund_basic`, `fund_nav`, `fund_div`, `fund_adj`, `fund_manager`. 以下输出字段列出程序实际请求的字段, 不代表接口的全部可选字段. 其余接口保留为后续调研条目. 日期参数统一使用 `YYYYMMDD`.
-
-### 基金列表 `fund_basic`
-
-用途: 获取场外基金基础清单, 包括存续, 已终止和发行中的基金. 调用程序: `research/explore_funds.py`. [官方文档](https://tushare.pro/document/2?doc_id=19).
-
-输入
-
-`ts_code` 基金代码
-
-`market` 交易市场 E场内（默认） O场外
-
-`status` 存续状态 D摘牌/已到期 I发行 L已上市/存续中
-
-`fields` 指定返回字段, 程序显式请求下列 25 个字段
-
-`limit` 每页请求行数, 正式获取时为 1000
-
-`offset` 分页起始行数, 从 0 开始, 按实际返回行数递增
-
-当前调用: 固定 `market='O'`, 分别请求 `status='L'`, `'D'`, `'I'`, 不指定单只 `ts_code`. 官方文档未在本接口参数表中列出 `limit/offset`, 程序先实测分页行为后再使用, 不能把单次返回结果直接当作全量清单.
-
-输出
-
-`ts_code` 基金代码, 不同份额类别可能对应不同代码
-
-`name` 基金简称
-
-`management` 基金管理人
-
-`custodian` 基金托管人
-
-`fund_type` 投资类型
-
-`found_date` 成立日期
-
-`due_date` 到期日期, 未独立核实前不能直接等同于实际终止日期
-
-`list_date` 上市日期
-
-`issue_date` 发行日期
-
-`delist_date` 退市日期, 场外样本可能为空
-
-`issue_amount` 发行份额, 单位为亿份
-
-`m_fee` 管理费
-
-`c_fee` 托管费
-
-`duration_year` 存续期, 不直接作为已实际存续年数参与排名
-
-`p_value` 面值
-
-`min_amount` 起点金额, 单位为万元
-
-`exp_return` 预期收益率
-
-`benchmark` 业绩比较基准描述
-
-`status` 存续状态, D摘牌/已到期, I发行, L已上市/存续中
-
-`invest_type` 投资风格
-
-`type` 基金类型
-
-`trustee` 受托人
-
-`purc_startdate` 日常申购起始日
-
-`redm_startdate` 日常赎回起始日
-
-`market` 交易市场, E场内, O场外
-
-### 基金管理人 `fund_company`
-输入
-
-无
-
-输出
-
-### 基金经理 `fund_manager`
-
-用途: 获取库内基金的经理介绍和任职历史. 调用入口: `scripts/update_database.py`, 获取与入库流程: `etl/update_funds.py`. [官方文档](https://tushare.pro/document/2?doc_id=208).
-
-输入
-
-`ts_code` 基金代码, 从数据库清单逐只读取
-
-`limit` 每页请求 1000 行, 官方单次最大 5000 行
-
-`offset` 从 0 开始请求, 按实际返回行数递增, 直到空页
-
-`fields` 显式请求下列 7 个字段; 不传 `ann_date` 和 `name` 条件, 获取全部返回的任职记录
-
-输出
-
-`ts_code` 基金代码
-
-`ann_date` 公告日期
-
-`name` 基金经理姓名
-
-`begin_date` 任职日期
-
-`end_date` 离任日期, 空格转换为 NULL, 不据此认定在任
-
-`edu` 学历
-
-`resume` 简历
-
-保存至 `fund_manager`, 保留不同任期和公告版本. 不采集性别, 出生年份和国籍. 官方要求至少 500 积分, 2000 积分以上可提高访问频次. 当前请求节奏沿用客户端间隔和重试配置.
-
-### 基金业绩基准 `mkt_idx_bmk`
-
-### 基金规模 `fund_share`
-
-### 基金净值 `fund_nav`
-
-用途: 获取所选基金的历史净值. 调用程序: `research/fetch_fund_history.py`. [官方文档](https://tushare.pro/document/2?doc_id=119).
-
-输入
-
-`ts_code` 基金代码, 当前程序逐只请求
-
-`nav_date` 指定净值日期, 官方支持与基金代码二选一查询, 当前程序不传
-
-`market` 交易市场 E场内 O场外, 当前程序按基金代码查询, 不额外传入
-
-`start_date` 净值开始日期, 从该基金成立日开始分段
-
-`end_date` 净值结束日期, 默认至运行当天, 可通过程序的 `--end-date` 指定
-
-`fields` 指定返回字段, 当前请求下列 7 个字段
-
-当前调用: 每只基金按两年窗口请求, 不一次请求全部历史. 单段达到 2000 行会触发疑似截断检查; 这是程序的保护阈值, 不是该接口文档已确认的最大行数.
-
-输出
-
-`ts_code` 基金代码
-
-`ann_date` 公告日期, 与净值日期可能不同
-
-`nav_date` 净值日期, 用于排列历史净值序列
-
-`unit_nav` 单位净值
-
-`accum_nav` 累计净值
-
-`adj_nav` 复权单位净值, 不等同于复权因子
-
-`accum_div` 累计分红, 空值不能解释为没有分红
-
-原探索程序保存至 `nav.csv`, 不补齐非披露日期. 2026-09-21 的 10 只样本中 `accum_div` 大量缺失.
-
-统一更新程序 `etl/update_funds.py` 另请求 `ts_code,ann_date,nav_date,net_asset,total_netasset`, 分别为基金代码, 公告日期, 净值日期, 资产净值和合计资产净值. 只将至少一项资产非空的行保存至 `fund_asset`, 不改变原有 `fund_nav` 字段. 首次历史回填, 后续按资产表末日滚动更新, 可用 `--full-history` 复查旧日期补录和修订. 原始金额和两种资产口径分别保留, 官方未明确单位和合计范围, 暂不换算为亿元. 当前样本的资产数据低于日频披露, 不前向填充.
-
-### 基金复权因子 `fund_adj`
-
-用途: 尝试获取独立复权因子. 调用程序: `research/fetch_fund_history.py`. [官方文档](https://tushare.pro/document/2?doc_id=199).
-
-输入
-
-`ts_code` 基金代码, 官方支持多只输入, 当前程序逐只请求
-
-`trade_date` 指定交易日期, 当前程序不传
-
-`start_date` 开始日期, 当前使用基金成立日
-
-`end_date` 结束日期, 与净值请求截止日期一致
-
-`limit` 每页请求行数, 当前为 1000
-
-`offset` 分页起始行数, 从 0 开始, 直到返回空页
-
-`fields` 指定返回字段, 当前请求下列 3 个字段
-
-输出
-
-`ts_code` 基金代码
-
-`trade_date` 因子对应的交易日期
-
-`adj_factor` 独立复权因子
-
-程序将 `trade_date` 对齐至 `nav_date`, 按基金代码和日期合并到 `nav.csv`. 2026-09-21 本次 10 个场外样本的请求均返回空表, 因此保存的 `adj_factor` 全为空. 未填 1, 未用 `adj_nav / unit_nav` 替代. 此结果不能推广为所有场外基金都没有因子数据.
-
-### 基金分红 `fund_div`
-
-用途: 获取所选基金的分红事件. 调用程序: `research/fetch_fund_history.py`. [官方文档](https://tushare.pro/document/2?doc_id=120).
-
-输入
-
-`ts_code` 基金代码, 当前程序逐只请求
-
-`ann_date` 公告日期, 当前程序不传
-
-`ex_date` 除息日期, 当前程序不传
-
-`pay_date` 派息日期, 当前程序不传
-
-`fields` 指定返回字段, 当前请求下列 9 个字段
-
-`limit` 每页请求行数, 当前为 1000
-
-`offset` 分页起始行数, 当前从 0 开始请求至空页
-
-官方输入条件为基金代码, 公告日, 除息日, 派息日四选一. 当前按基金代码请求全部事件, 不受程序的 `--end-date` 限制. 本接口官方参数表未列出 `limit/offset`, 程序使用通用分页封装并检查重复页; 当前样本事件数少于一页, 尚未验证多页非空结果的行为.
-
-输出
-
-`ts_code` 基金代码
-
-`ann_date` 公告日期
-
-`div_proc` 分红方案进度, 不同进度不能直接作为多次分红相加
-
-`record_date` 权益登记日
-
-`ex_date` 除息日
-
-`pay_date` 派息日
-
-`div_cash` 每份派现金额, 单位为元, 官方字段说明为每股派息
-
-`net_ex_date` 净值除权日
-
-`account_date` 红利再投资到账日
-
-分红按事件保存到 `dividends.csv`, 不展开为每日记录. 本次数据的 `net_ex_date` 和 `account_date` 部分缺失, 不自动用其他日期替代. 接口还支持实施公告日等其他输出字段, 本次未请求.
-
-### 基金持仓 `fund_portfolio`
-
-### 场内基金技术因子（专业版）`fund_factor_pro`
+页面只依赖服务层；服务层只依赖 `FundRepository` 接口。详细规则见 [架构说明](docs/architecture.md)。
+
+## 目录
+
+| 目录 | 内容 |
+| --- | --- |
+| `api/` | Tushare 客户端、请求字段、限频与重试 |
+| `etl/` | 分页取数、清洗、添加基金、增量更新、快照导入 |
+| `database/` | 连接、表结构、UPSERT、DuckDB / CSV 查询实现 |
+| `services/` | 基金查询、日期对齐、收益回撤、七项指标、多基金对比 |
+| `app/` | Streamlit 页面、组件、样式 |
+| `scripts/` | 建库、添加基金、更新数据库的命令入口 |
+| `docs/` | 架构、数据流程、指标、数据源和开发约定 |
+| `tests/` | 数据导入、更新、服务、指标和页面测试 |
+| `research/` | 一次性数据探索与历史核查，不被正式流程依赖 |
+| `ifind_test/` | iFinD 取数验证脚本 |
+| `data/` | 本地数据库、快照、批次和工具，不提交 Git |
+| `logs/` | 运行日志和 JSON 摘要，不提交 Git |
+
+## 数据原则
+
+- **主键 + UPSERT**：重复运行只更新变化记录，不产生重复业务数据。
+- **保留公告版本**：净值按 `nav_date` 取最新公告；分红保留不同公告和方案版本，不把版本数当分红次数。
+- **不补造数据**：缺失日期、净值、公告日保持缺失；指标条件不满足时明确标记“无法计算”。
+- **事务边界**：基础资料和净值同批提交；分红、经理、资产独立提交，单项失败不影响其他数据。
+- **本地优先**：Token、数据库、日志和数据快照留在本机。页面不请求 Tushare。
+
+## 当前状态
+
+- 运行环境：Windows、Python 3.14、项目内 `.venv`。
+- 数据源：Tushare Pro；iFinD 仅完成取数验证，尚未接入正式流程。
+- 存储：DuckDB 单文件，默认 `data/fund_database.duckdb`。
+- 页面：基金分析、基金对比、数据说明。
+- CSV 查询保留为对照模式，通过 `NAV_CSV` 环境变量启用。
+
+## 开发约定
+
+长期维护以“分层清晰、依赖单向、够用即可”为原则。新增功能前先确认归属层，避免跨层调用和不必要的抽象。完整约定见 [开发约定](docs/development.md)。

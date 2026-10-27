@@ -1,5 +1,7 @@
 # 基金对比开发前的数据检查
 
+> 历史报告（2026-10-14）。当前指标与对比口径见 [指标与对比](../docs/metrics.md)。
+
 检查日期: 2026-10-14.
 
 检查对象: 本地 `data/fund_database.duckdb` 中已有净值的 5 只基金. 通过 Repository 和 FundService 只读查询, 未请求 Tushare, 未修改数据库或指标公式.
