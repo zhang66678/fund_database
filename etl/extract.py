@@ -10,6 +10,10 @@ from api.tushare_client import FetchError
 # 每次历史请求覆盖的自然年数, 净值和资产共用此设置.
 WINDOW_YEARS = 6
 
+# 单段行数保护阈值. 6 年逐日净值理论上限约 2196 行, 2500 留出少量公告版本余量.
+# 这是程序保护值, 不是 Tushare 官方单次上限.
+MAX_ROWS_PER_WINDOW = 2500
+
 
 def paged(source, endpoint: str, fields: str, size: int = 1000, **params) -> pd.DataFrame:
     """分页读取直到空页; 如果服务器重复返回同一页, 则报错停止.
@@ -44,8 +48,10 @@ def fetch_series(source, endpoint: str, fields: str, code: str,
         left = max(start, date(year, 1, 1)).strftime('%Y%m%d')
         right = min(end, date(year + WINDOW_YEARS - 1, 12, 31)).strftime('%Y%m%d')
         part = source.query(endpoint, fields, ts_code=code, start_date=left, end_date=right)
-        if len(part) >= 2000:
-            raise FetchError(f'{endpoint}: possible truncation for {left}-{right}')
+        if len(part) >= MAX_ROWS_PER_WINDOW:
+            raise FetchError(
+                f'{endpoint}: {len(part)} rows reach protection limit for {left}-{right}'
+            )
         if not part.empty and (not part[date_col].between(left, right).all()
                                or not part['ts_code'].eq(code).all()):
             raise FetchError(f'{endpoint}: invalid code/date range')

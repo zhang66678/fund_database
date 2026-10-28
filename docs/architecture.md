@@ -71,6 +71,16 @@ Tushare Pro
 - 控制最小请求间隔，有限重试。
 - 把网络、权限、限频错误分类，并避免凭证进入日志。
 
+### 名单快照
+
+`etl/fund_list.py` 负责：
+
+- 获取 `L`、`D`、`I` 三种状态的场外基金，保存 `data/fund_list/时间戳/` 快照。
+- 写入 `fund_basic_all.csv` 和 `list_summary.json`。
+- 提供 `latest_snapshot()`，供 `scripts.add_fund --from-list` 和研究脚本复用。
+
+命令入口为 `scripts/update_fund_list.py`。
+
 `api/ifind_client.py` 负责 HTTP 鉴权、请求、错误提示和 10 分钟内存缓存。`app/bootstrap.py` 根据会话中的数据源选择组装服务，iFinD 客户端在当前浏览器会话复用，页面和服务不直接请求接口。
 
 ## 目录职责
@@ -78,11 +88,11 @@ Tushare Pro
 | 目录 | 主要文件 |
 | --- | --- |
 | `api/` | `tushare_client.py`、`fund_fields.py`、`ifind_client.py` |
-| `etl/` | `extract.py`、`import_snapshot.py`、`add_funds.py`、`update_funds.py` |
+| `etl/` | `extract.py`、`fund_list.py`、`import_snapshot.py`、`add_funds.py`、`update_funds.py` |
 | `database/` | `connection.py`、`schema.py`、`writer.py`、`repository.py`、`duckdb_repository.py`、`csv_repository.py`、`ifind_repository.py` |
 | `services/` | `fund_service.py`、`fund_metrics.py` |
 | `app/` | `streamlit_app.py`、`comparison_page.py`、`components.py`、`bootstrap.py`、`styles.css` |
-| `scripts/` | `init_database.py`、`add_fund.py`、`update_database.py` |
+| `scripts/` | `init_database.py`、`update_fund_list.py`、`add_fund.py`、`update_database.py` |
 
 ## 扩展位置
 

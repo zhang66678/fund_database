@@ -95,10 +95,12 @@ def test_prepare_batch_filters_latest_snapshot_and_preserves_database(tmp_path, 
     ]
     frame = pd.DataFrame(rows, columns=["ts_code", "name", "fund_type", "found_date", "status", "market"])
     frame.to_csv(latest, index=False, encoding="utf-8-sig")
+    (latest.parent / "list_summary.json").write_text("{}", encoding="utf-8")
     older = snapshots / "20260921_095101/fund_basic_all.csv"
     older.parent.mkdir(parents=True)
     # 旧目录的文件后写入, 仍应按快照目录时间而非文件修改时间选择.
     frame.iloc[:1].to_csv(older, index=False, encoding="utf-8-sig")
+    (older.parent / "list_summary.json").write_text("{}", encoding="utf-8")
 
     def unexpected_client():
         raise AssertionError("Preparing a batch must not initialize the API client")

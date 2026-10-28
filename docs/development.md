@@ -33,6 +33,8 @@ python -m venv .venv
 | `test_database_import.py` | 幂等导入、公告版本、Decimal 精度、事务回滚 |
 | `test_update_funds.py` | 数据库驱动更新、失败隔离、异常行、批次范围 |
 | `test_add_funds.py` | 批量排重、失败重跑、从名单生成批次 |
+| `test_fund_list.py` | 名单分页与快照输出 |
+| `test_ifind.py` | iFinD HTTP 缓存、字段适配和 Repository 契约 |
 | `test_fund_service.py` | 代码规范化、区间查询、空结果、对比与回撤 |
 | `test_fund_metrics.py` | 七项指标手算、零风险、缺口处理 |
 | `test_streamlit_app.py` | 查询、筛选、会话状态、对比页、错误反馈 |

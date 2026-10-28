@@ -8,12 +8,29 @@
 | --- | --- | --- |
 | `python -m scripts.init_database` | 创建数据库和缺失的表 | 否 |
 | `python -m scripts.init_database --snapshot <目录>` | 从单基金快照建库并导入 | 否 |
+| `python -m scripts.update_fund_list` | 更新场外基金总名单快照 | 是 |
 | `python -m scripts.add_fund <代码>` | 添加一只场外基金的基础资料 | 是 |
 | `python -m scripts.add_fund --file <csv>` | 批量添加基础资料 | 是（仅新代码） |
 | `python -m scripts.add_fund --from-list` | 从本地总名单生成批次 CSV | 否 |
 | `python -m scripts.update_database` | 更新全库数据 | 是 |
 
-添加和更新都应先停止 Streamlit，避免 DuckDB 写锁冲突。
+添加和更新数据库前应停止 Streamlit，避免 DuckDB 写锁冲突。
+
+## 更新基金名单
+
+名单是批量添加的输入，需定期更新：
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_fund_list
+```
+
+- 请求 `fund_basic` 的 `L`、`D`、`I` 三种状态，固定 `market=O`。
+- 每页 1000 行，先用小页探测确认 `offset` 生效。
+- 输出到 `data/fund_list/时间戳/`：三个状态 CSV、`fund_basic_all.csv`、`list_summary.json`。
+- 只有三种状态全部获取并校验完成后才写摘要；有摘要表示快照完整。
+- `--run-dir` 可指定输出目录，便于复现或重跑。
+- 不读取数据库，不写数据库；日志在 `logs/fund_list.log`。
+- `scripts.add_fund --from-list` 和研究脚本默认使用最新完整快照。
 
 ## 初始化
 
@@ -68,6 +85,7 @@ ts_code
 
 规则：
 
+- 先运行 `scripts.update_fund_list` 生成最新完整快照。
 - 不传路径时，取 `data/fund_list/` 下目录名最新的完整快照。
 - 候选为场外 `market=O`，状态默认 `L`，可指定 `L`、`D`、`I`。
 - 先排除已入库基金，再按成立日期和代码排序取前 `limit` 只。
@@ -151,6 +169,7 @@ ts_code
 | --- | --- |
 | `logs/database_update.log` | 本轮更新过程 |
 | `logs/database_update_时间戳.json` | 每只基金、每张表的新增 / 更新 / 未变化数量及失败原因 |
+| `logs/fund_list.log` | 名单快照获取过程 |
 | `logs/add_fund.log` | 添加过程 |
 | `logs/add_funds_时间戳.json` | 批量添加摘要 |
 | `logs/fund_batch_时间戳.json` | 批次筛选条件与输出路径 |

@@ -12,6 +12,7 @@ from api.fund_fields import BASIC
 from api.tushare_client import Source
 from database.connection import DATABASE_PATH, connect
 from database.writer import existing_fund_codes, write_batch
+from etl.fund_list import latest_snapshot
 from etl.import_snapshot import normalize
 
 
@@ -68,11 +69,7 @@ def prepare_fund_batch(
     if not database_path.is_file():
         raise FileNotFoundError("请先运行 python -m scripts.init_database 初始化数据库")
     if list_path.is_dir():
-        snapshots = sorted(path for path in list_path.glob("*/fund_basic_all.csv")
-                           if re.fullmatch(r"\d{8}_\d{6}", path.parent.name))
-        if not snapshots:
-            raise FileNotFoundError("未找到基金名单快照, 请用 --from-list 指定 CSV 路径")
-        list_path = snapshots[-1]
+        list_path = latest_snapshot(list_path) / "fund_basic_all.csv"
     logging.info("Batch selection started: source=%s limit=%s status=%s types=%s",
                  list_path, limit, list(statuses), fund_types)
     columns = ["ts_code", "name", "fund_type", "found_date", "status", "market"]

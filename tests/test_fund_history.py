@@ -21,7 +21,7 @@ def test_windows_cover_leap_day_and_end_date_without_overlap():
 
     source = FakeSource()
     fetch_series(source, 'fund_nav', 'ts_code,nav_date', 'A', date(2020, 2, 29), date(2024, 3, 1))
-    assert source.calls == [('20200229', '20211231'), ('20220101', '20231231'), ('20240101', '20240301')]
+    assert source.calls == [('20200229', '20240301')]
 
 
 def test_merge_preserves_announcements_and_missing_factors():

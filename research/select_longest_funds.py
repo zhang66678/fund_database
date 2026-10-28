@@ -7,27 +7,15 @@
 import argparse
 import json
 import logging
-import re
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
+from etl.fund_list import latest_snapshot
+
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger(__name__)
-
-
-def latest_snapshot(base: Path) -> Path:
-    """按采集目录的时间戳选择最新完整快照, 跳过尚未生成摘要的失败任务."""
-    candidates = [
-        path for path in base.iterdir()
-        if path.is_dir() and re.fullmatch(r'\d{8}_\d{6}', path.name)
-        and (path / 'fund_basic_all.csv').is_file()
-        and (path / 'list_summary.json').is_file()
-    ]
-    if not candidates:
-        raise ValueError('没有找到完整清单快照, 请先运行 research.explore_funds list')
-    return max(candidates, key=lambda path: path.name)
 
 
 def parse_dates(series: pd.Series) -> pd.Series:

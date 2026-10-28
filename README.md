@@ -23,7 +23,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
 ```
 
-更新数据库前请停止 Streamlit，避免 DuckDB 文件写锁冲突。更多命令和失败处理见 [数据流程](docs/etl.md)。
+更新数据库前请停止 Streamlit，避免 DuckDB 文件写锁冲突。需要批量扩充基金时，先运行 `scripts.update_fund_list` 更新总名单快照，再用 `scripts.add_fund --from-list` 生成批次。更多命令和失败处理见 [数据流程](docs/etl.md)。
 
 ## 文档索引
 
@@ -61,11 +61,11 @@ flowchart LR
 | 目录 | 内容 |
 | --- | --- |
 | `api/` | Tushare / iFinD 客户端、请求字段、限频与缓存 |
-| `etl/` | 分页取数、清洗、添加基金、增量更新、快照导入 |
+| `etl/` | 名单快照、分页取数、清洗、添加基金、增量更新、快照导入 |
 | `database/` | 连接、表结构、UPSERT、DuckDB / CSV / iFinD 查询实现 |
 | `services/` | 基金查询、日期对齐、收益回撤、七项指标、多基金对比 |
 | `app/` | Streamlit 页面、组件、样式 |
-| `scripts/` | 建库、添加基金、更新数据库的命令入口 |
+| `scripts/` | 建库、更新名单、添加基金、更新数据库的命令入口 |
 | `docs/` | 架构、数据流程、指标、数据源和开发约定 |
 | `tests/` | 数据导入、更新、服务、指标和页面测试 |
 | `research/` | 一次性数据探索与历史核查，不被正式流程依赖 |
@@ -85,6 +85,7 @@ flowchart LR
 
 - 运行环境：Windows、Python 3.14、项目内 `.venv`。
 - 数据源：Tushare 本地数据库 / iFinD HTTP 接口，侧栏切换。iFinD 配置及首版范围见 [数据源](docs/data-sources.md#ifind)。
+- 名单：`scripts.update_fund_list` 定期生成场外基金快照，供批量添加和研究使用。
 - 存储：DuckDB 单文件，默认 `data/fund_database.duckdb`。
 - 页面：基金分析、基金对比、数据说明。
 - CSV 查询保留为对照模式，通过 `NAV_CSV` 环境变量启用。

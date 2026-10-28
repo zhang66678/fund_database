@@ -13,7 +13,7 @@ import pandas as pd
 
 from api.fund_fields import NAV_FIELDS, ADJ_FIELDS, DIV_FIELDS
 from etl.extract import paged, fetch_series
-from research.select_longest_funds import latest_snapshot
+from etl.fund_list import latest_snapshot
 from api.tushare_client import ROOT, FetchError, Source
 
 LOGGER = logging.getLogger(__name__)

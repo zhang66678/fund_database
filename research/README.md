@@ -2,11 +2,12 @@
 
 `research/` 存放一次性数据探索和历史核查脚本。正式流程不依赖本目录；脚本可以复用 `api/`、`etl/` 和 `database/` 的公共能力。
 
+基金总名单获取属于正式流程，入口为 `scripts.update_fund_list`，逻辑在 `etl/fund_list.py`。
+
 ## 脚本
 
 | 脚本 | 作用 | 是否请求 Tushare |
 | --- | --- | --- |
-| `explore_funds.py` | 获取场外基金总名单，按状态保存快照 | 是 |
 | `select_longest_funds.py` | 从最新完整快照筛选存续时间最长的基金 | 否 |
 | `fetch_fund_history.py` | 获取选中基金的净值、复权因子和分红 | 是 |
 | `audit_single_fund.py` | 单基金数据质量核查 | 是 |
@@ -14,8 +15,8 @@
 ## 运行
 
 ```powershell
-# 1. 获取基金总名单
-.\.venv\Scripts\python.exe -m research.explore_funds list
+# 1. 更新基金总名单（正式流程）
+.\.venv\Scripts\python.exe -m scripts.update_fund_list
 
 # 2. 从最新完整快照筛选最长存续基金
 .\.venv\Scripts\python.exe -m research.select_longest_funds
@@ -27,9 +28,11 @@
 .\.venv\Scripts\python.exe -m research.audit_single_fund --code 000001.OF --end-date 2026-10-12
 ```
 
-`explore_funds.py` 每次创建新的 `data/fund_list/时间戳/` 快照，不覆盖旧清单。`select_longest_funds.py` 默认使用目录名最新的完整快照，也可用 `--run-dir` 指定。`fetch_fund_history.py` 继承最新快照的 `top_10.csv`，输出到 `longest_lived/history/时间戳/`。
+`scripts.update_fund_list` 每次创建新的 `data/fund_list/时间戳/` 快照，不覆盖旧清单。`select_longest_funds.py` 默认使用目录名最新的完整快照，也可用 `--run-dir` 指定。`fetch_fund_history.py` 继承最新快照的 `top_10.csv`，输出到 `longest_lived/history/时间戳/`。
 
 ## 输出
+
+名单快照由 `scripts.update_fund_list` 生成：
 
 | 路径 | 内容 |
 | --- | --- |
