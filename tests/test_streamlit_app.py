@@ -11,6 +11,7 @@ from streamlit.testing.v1 import AppTest
 from app.components import range_dates
 from database.connection import connect
 from database.schema import initialize
+from services.fund_service import FundService
 
 
 @pytest.fixture
@@ -124,7 +125,7 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
     def visit(node, path=()):
         for i, child in getattr(node, "children", {}).items():
             here = (*path, i)
-            if child.type == "subheader" and child.value in ("绩效分析", "分红记录", "基金经理", "资产信息"):
+            if child.type == "subheader" and child.value in ("绩效分析", "分红记录", "涨幅与同类比较", "基金经理", "资产信息"):
                 positions[child.value] = here
             if child.type == "date_input":
                 positions["date"] = here
@@ -135,6 +136,8 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
     assert positions["date"] < positions["chart"]
     assert positions["绩效分析"][0] == positions["分红记录"][0]
     assert positions["绩效分析"] < positions["分红记录"]
+    assert positions["分红记录"][0] < positions["涨幅与同类比较"][0] < positions["基金经理"][0]
+    assert len(positions["涨幅与同类比较"]) == 2
     assert positions["基金经理"][0] == positions["资产信息"][0]
     assert not app.dataframe
     # 分红读取失败时, 已有净值和其他资料仍可正常展示.
@@ -144,6 +147,61 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
     assert not app.exception
     assert any("分红记录暂不可用" in item.value for item in app.warning)
     assert app.session_state["query_result"]["details"]["asset"] is not None
+
+
+def test_peer_returns_render_fixed_periods_and_preserve_submitted_results(page, monkeypatch):
+    app, path = page
+    with connect(path) as db:
+        for code, price in (("000001.OF", 1.4), ("000002.OF", 1.2), ("000003.OF", 0.9), ("000004.OF", 1.1)):
+            db.execute("INSERT INTO fund_basic(ts_code,name) VALUES (?,?) ON CONFLICT DO NOTHING", [code, code])
+            db.execute("INSERT INTO fund_category(ts_code,source,snapshot_date,category) VALUES (?,'ifind','2026-11-02','混合型 / 灵活配置型')", [code])
+            db.execute("INSERT INTO fund_nav(ts_code,nav_date,ann_date,adj_nav) VALUES (?,'2019-12-27','2019-12-27',1)", [code])
+            if code != "000001.OF":
+                db.execute("INSERT INTO fund_nav(ts_code,nav_date,ann_date,adj_nav) VALUES (?,'2020-01-03','2020-01-03',?)", [code, price])
+    calls = []
+    original = FundService.get_peer_returns
+
+    def query(service, code, *args, **kwargs):
+        calls.append(code)
+        return original(service, code, *args, **kwargs)
+
+    monkeypatch.setattr(FundService, "get_peer_returns", query)
+    app.selectbox(key="fund_choice").select("000001.OF").run()
+    assert calls == []
+    app.button(key="submit_query").click().run()
+    assert not app.exception
+    result = app.session_state["query_result"]["peer_returns"]
+    assert calls == ["000001.OF"]
+    assert result["groups"]["stages"][0]["rank"] == 1
+    assert result["groups"]["stages"][0]["sample_count"] == 4
+    assert result["groups"]["stages"][0]["quartile_label"] == "优秀"
+    assert [tab.label for tab in app.tabs] == ["阶段涨幅", "季度涨幅", "年度涨幅"]
+    tables = [node.proto.body for node in app.get("html") if '<table class="peer-returns-table">' in node.proto.body]
+    assert len(tables) == 3
+    assert "+40.00%" in tables[0] and "+15.00%" in tables[0] and "1 / 4" in tables[0]
+    assert 'role="img" aria-label="第1四分位, 优秀"' in tables[0]
+    assert "2019-12-27 至 2020-01-03" in tables[0]
+    assert "2020年Q1" in tables[1] and "截至 2020-01-03" in tables[1]
+    app.segmented_control(key="time_range").select("近3个月").run()
+    app.text_input(key="fund_code").set_value("000002").run()
+    assert app.session_state["query_result"]["peer_returns"] == result
+    assert calls == ["000001.OF"]
+    app.radio(key="workspace_page").set_value("数据说明").run()
+    app.radio(key="workspace_page").set_value("基金分析").run()
+    assert app.session_state["query_result"]["peer_returns"] == result and len(calls) == 1
+    # 热更新前保存的结果缺少新字段时, 提示重新查询, 不触发隐式计算.
+    app.session_state["query_result"].pop("peer_returns")
+    app.run()
+    assert any("点击查询加载涨幅与同类比较" in item.value for item in app.caption)
+    assert len(calls) == 1
+
+    def fail(*args, **kwargs):
+        raise OSError("模拟同类数据读取失败")
+
+    monkeypatch.setattr(FundService, "get_peer_returns", fail)
+    app.button(key="submit_query").click().run()
+    assert not app.exception and not app.session_state["query_result"]["nav"].empty
+    assert any("涨幅与同类比较暂不可用" in item.value for item in app.warning)
 
 
 def test_invalid_conditions_empty_data_and_storage_failure_keep_empty_chart(page, monkeypatch, tmp_path):
@@ -373,6 +431,8 @@ def test_source_switch_clears_both_results_preserves_code_and_queries_only_on_su
     app.button(key="submit_query").click().run()
     result = app.session_state["query_result"]
     assert result["source"] == "ifind" and result["nav"].unit_nav.iloc[0] == 2
+    assert result["peer_returns"] is None
+    assert any("iFinD 在线模式暂不提供同类基金批量比较" in item.value for item in app.info)
     assert result["name"] == "iFinD 样本甲"
     assert result["metrics"]["nav_count"] == 3
     assert any("数据来源: iFinD" in c.value for c in app.caption)
