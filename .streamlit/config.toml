@@ -21,3 +21,6 @@ chartCategoricalColors = ["#2563EB", "#0D9488", "#7C3AED"]
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F1F5F9"
 headingFontSizes = ["1.5rem", "1.25rem", "1.125rem"]
+
+[server]
+enableWebsocketCompression = true

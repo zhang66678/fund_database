@@ -82,4 +82,4 @@ def show_peer_returns(result: dict | None) -> None:
                 periods = data["groups"][key]
                 st.html(_returns_table(periods, label))
         st.caption("净值来源: Tushare 本地数据. 同类平均为有效份额的等权平均, 含本基金; 各周期样本数可能不同. 四分位由优到劣为优秀, 良好, 一般, 不佳.")
-        st.caption("涨幅基于复权净值, 不年化. 当前季度和年度计算截至最新净值日; 数据不足显示 —, 不补齐净值. 结果为本地计算, 不代表供应商官方排名.")
+        st.caption("涨幅由本地复权净值计算, 不年化. 当前季度和年度截至最新净值日; 数据不足显示 —.")

@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
+from app.fund_search import fund_candidates
 
 NAV_LABELS = {"unit_nav": "单位净值", "accum_nav": "累计净值", "adj_nav": "复权单位净值"}
 NAV_COLORS = {"unit_nav": "#2563EB", "accum_nav": "#0D9488", "adj_nav": "#7C3AED"}
@@ -101,18 +102,27 @@ def show_search(funds: dict) -> str:
     st.session_state.fund_code = draft["code"]
     code = choice_code(draft["code"])
     st.session_state.fund_choice = code if code in funds else None
-    labels = fund_option_labels(funds)
     with st.container(border=True, key="fund_search"):
-        select_col, code_col = st.columns([3, 1], gap="medium")
+        keyword_col, select_col, code_col = st.columns([2, 3, 1], gap="medium")
+        if "fund_keyword" not in st.session_state:
+            st.session_state.fund_keyword = draft.get("keyword", "")
+        keyword = keyword_col.text_input(
+            "搜索基金", key="fund_keyword", placeholder="代码或名称, 按 Enter 搜索",
+            on_change=remember_query, args=("keyword", "fund_keyword"),
+        )
+        candidates, note = fund_candidates(funds, keyword, [code])
+        labels = fund_option_labels(candidates)
         select_col.selectbox(
-            "选择基金", options=list(funds), index=None, key="fund_choice",
-            format_func=labels.get, placeholder="按代码或名称选择基金",
-            on_change=_choose_fund, disabled=not funds,
+            "选择基金", options=list(candidates), index=None, key="fund_choice",
+            format_func=labels.get, placeholder="从搜索结果选择基金",
+            on_change=_choose_fund, disabled=not candidates,
+            filter_mode="contains",
         )
         code = code_col.text_input(
             "基金代码", key="fund_code", placeholder="输入基金代码",
             on_change=_edit_code, args=(funds,), help="保留手动查询, 最终以此处代码为准",
         )
+        st.caption(note)
     return code
 
 
@@ -331,7 +341,7 @@ def show_performance(result: dict | None) -> None:
                 value = metrics["metrics"][key]
                 column.metric(label, "无法计算" if value is None else format(value, fmt), border=True)
         if metrics["short_period"]:
-            st.warning("该区间不足一年, 年化结果可能被放大, 请结合实际区间查看.")
+            st.caption("统计区间不足一年.")
         with st.expander("指标计算口径"):
             st.caption(f"实际区间: {metrics['start_date']} 至 {metrics['end_date']}, {metrics['nav_count']} 条交易日复权净值.")
             st.caption(f"年化系数 {metrics['periods_per_year']}, 无风险利率 {metrics['risk_free_rate']:.1%}, 目标收益率 {metrics['target_return']:.1%}.")
@@ -353,7 +363,7 @@ def show_dividends(result: dict | None) -> None:
             st.caption("点击查询加载分红记录.")
             return
         if not records:
-            st.info("所选来源未返回分红记录, 不代表基金从未分红.")
+            st.info("所选来源未返回分红记录.")
             return
         if result.get("source") == "ifind":
             st.caption("iFinD 基金分红报表, 按首次公告日期查询成立以来记录, 不受净值区间限制. 金额为每份分红; 方案进度未提供.")
@@ -382,7 +392,7 @@ def _show_managers(details: dict | None, source: str = "tushare") -> None:
     else:
         if source == "ifind":
             st.caption("iFinD 历任经理记录, 现任经理补充学历与简历. 接口未提供任职公告日期.")
-        st.caption("按任职日期倒序. 离任日期未提供不代表仍在任职.")
+        st.caption("按任职日期倒序展示.")
         # 多任期列表在卡片内滚动, 避免拉长整个分析页面.
         with st.container(height=340, border=False):
             for index, manager in enumerate(details["managers"]):
@@ -411,13 +421,13 @@ def _show_asset(details: dict | None, source: str = "tushare") -> None:
             for field, label in (("net_asset", "基金资产净值"), ("total_asset", "基金资产总值")):
                 value = asset.get(field)
                 st.metric(label, "未提供" if pd.isna(value) else f"{value:,.2f}")
-            st.caption("按 iFinD 指标原始金额展示, 单位及份额合并范围待核实. 资产总值包含负债对应资产, 不等于合计资产净值; 两项不可相加.")
+            st.caption("金额按 iFinD 原值展示, 单位及份额合并范围未确认.")
             return
         st.caption(f"资产日期: {_date_text(asset['nav_date'])} | 公告日期: {_date_text(asset['ann_date'])}")
         for field, label in (("net_asset", "资产净值"), ("total_netasset", "合计资产净值")):
             value = asset[field]
             st.metric(label, "未提供" if pd.isna(value) else f"{value:,.2f}")
-        st.caption("金额按源数据原值展示, 单位及合计范围待核对, 不换算为亿元, 两项不可相加.")
+        st.caption("金额按源数据原值展示, 单位及合计范围未确认.")
 
 
 def show_details(result: dict | None) -> None:
@@ -437,20 +447,20 @@ def show_data_notes() -> None:
     with st.container(border=True, key="notes_nav"):
         st.subheader("数据范围与净值")
         st.write("侧栏可切换 Tushare 本地数据库和 iFinD HTTP 接口. 本地模式不请求 Tushare; iFinD 模式在提交查询后取数, 相同请求缓存 10 分钟, 不写入数据库. 切换来源会清除两页旧结果.")
-        st.write("本地快捷区间以最新净值日为基准; iFinD 快捷区间以今天为基准, 全部范围从接口返回的成立日期开始查询. 实际净值日期以结果为准, 不将当天尚未披露的净值视作实时行情.")
+        st.write("本地快捷区间以最新净值日为基准; iFinD 快捷区间以今天为基准, 全部范围从基金成立日期开始查询. 结果标注实际净值日期.")
         st.write("单位净值, 累计净值和复权单位净值直接使用来源数据. 多条曲线保留原始量级, 缺失值保持断点, 不插值或归一化.")
         st.write("单基金图上方左轴为原始净值, 右轴为区间累计收益率, 下方为回撤. 收益采用区间首个开市日复权净值为基期; 回撤相对所选区间内已观测峰值, 不含区间前历史峰值, 以负百分比展示. 两条派生曲线使用 SSE 开市日, 不填充缺失记录.")
-        st.write("概览资料来自所选来源, 不按净值区间还原历史资料或历史基准. iFinD 首版仅接入简称和成立日期, 投资类型及基准暂未接入; 两源复权方法仍需进一步核对, 不保证指标结果完全一致.")
+        st.write("概览展示所选来源的当前基金资料. iFinD 提供简称和成立日期, 投资类型及基准暂未接入.")
         st.write("基金对比使用共同开市日的复权净值计算累计收益, 从相同起点的 0% 开始. 原始净值不修改, 中间缺失保留断点, 实际比较区间以结果标注为准.")
     with st.container(border=True, key="notes_metrics"):
         st.subheader("绩效指标")
-        st.write("七项指标均通过现有服务按交易日复权净值计算, 不随所选曲线类型变化. 实际计算区间, 样本数, 年化系数, 无风险利率和目标收益率以查询结果中的计算口径为准.")
-        st.write("区间不足一年时保留年化提示. 两种来源均使用本地 SSE 日历, 缺少或未覆盖查询日期时仅展示净值并提示计算失败. 特殊基金的交易日适用性仍需单独核查.")
+        st.write("七项指标按交易日复权净值计算, 不随所选曲线类型变化. 指标计算口径中列出实际区间, 样本数, 年化系数, 无风险利率和目标收益率.")
+        st.write("统计区间不足一年时显示标注. 两种来源均使用本地 SSE 日历, 日历缺失或未覆盖查询日期时仅展示净值, 并提示指标计算失败.")
         st.write("涨幅与同类比较独立使用基金最新净值日, 展示阶段涨幅, 含当前季度的八个季度和含今年的八个年度. 分类采用已采集的 iFinD 投资类型一级/二级路径, 涨幅使用本地 Tushare 复权净值, 不年化, 不受图表区间影响.")
-        st.write("同类平均为有效份额等权平均, 含本基金; 排名显示名次和有效样本数, 按涨幅降序且并列取最小名次. 四分位由优到劣为优秀, 良好, 一般, 不佳, 少于四只有效样本时不提供四分位. 数据不足保持缺失, 可悬停单元格查看实际区间及原因; 本地计算不代表供应商官方排名. iFinD 在线模式暂不提供同类批量比较.")
+        st.write("同类平均为有效份额等权平均, 含本基金; 排名由本地数据计算, 显示名次和有效样本数, 按涨幅降序且并列取最小名次. 四分位由优到劣为优秀, 良好, 一般, 不佳, 少于四只有效样本时不提供四分位. 数据不足显示 —, 可悬停单元格查看实际区间及原因. iFinD 在线模式暂不提供同类批量比较.")
     with st.container(border=True, key="notes_details"):
         st.subheader("分红, 经理与资产资料")
-        st.write("分红按除息日和公告日期倒序, 金额按每份派现金额展示. Tushare 保留本地全部披露; iFinD 按首次公告日期查询成立以来的分红事件, 未提供方案进度. 不将记录条数当作实际分红次数, 不直接累加各版本金额. 未返回记录不代表从未分红.")
-        st.write("同一经理姓名和任期采用最新公告记录, 离任日期未提供不代表仍在任职. 资产展示本地最新披露日期及原始金额, 不假设单位, 不换算为亿元, 不将两种口径相加.")
-        st.write("iFinD 经理履历提供姓名、任职起止日和明确的任职状态, 现任经理补充学历与简历, 未提供任职公告日期. iFinD 资产按同一最新报告期读取资产净值和资产总值, 并单独标注季度报告披露日期; 总资产不映射为 Tushare 合计资产净值.")
-        st.write("分红, 经理与资产资料不按净值查询区间截取, 不能直接视为历史时点可得信息. CSV 对照模式暂不提供这三类资料, 不自动用其他来源补齐.")
+        st.write("分红按除息日和公告日期倒序, 金额为每份派现金额. Tushare 展示本地全部披露及公告版本; iFinD 按首次公告日期查询成立以来的分红事件, 未提供方案进度.")
+        st.write("同一经理姓名和任期采用最新公告记录. 资产展示最新披露日期及原始金额, 单位及合计范围未确认.")
+        st.write("iFinD 经理履历提供姓名, 任职起止日和任职状态, 现任经理补充学历与简历, 未提供任职公告日期. iFinD 资产展示同一最新报告期的资产净值和资产总值, 并标注季度报告披露日期; Tushare 展示资产净值和合计资产净值.")
+        st.write("分红, 经理与资产资料独立于净值查询区间展示. CSV 对照模式暂不提供这三类资料.")

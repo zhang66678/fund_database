@@ -9,6 +9,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from app.components import range_dates
+from app.fund_search import fund_candidates
 from database.connection import connect
 from database.schema import initialize
 from services.fund_service import FundService
@@ -50,12 +51,36 @@ def traces(app):
     return json.loads(app.get("plotly_chart")[0].proto.spec)["data"]
 
 
+def select_fund(app, code):
+    app.text_input(key="fund_keyword").set_value(code).run()
+    app.selectbox(key="fund_choice").select(code).run()
+
+
+def select_comparison(app, codes):
+    for code in codes:
+        app.text_input(key="comparison_keyword").set_value(code).run()
+        selected = [value for value in app.multiselect(key="comparison_codes").value if value in codes]
+        app.multiselect(key="comparison_codes").set_value(list(dict.fromkeys([*selected, code]))).run()
+    app.multiselect(key="comparison_codes").set_value(codes).run()
+
+
+def test_keyword_candidates_preserve_selected_beyond_limit_and_ignore_case():
+    funds = {f"{i:06}.OF": f"Alpha基金{i}" for i in range(80)}
+    candidates, note = fund_candidates(funds, " alpha ", ["000079.OF"])
+    assert len(candidates) == 51 and list(candidates)[0] == "000079.OF"
+    assert "显示前 50 条" in note
+    assert list(fund_candidates(funds, "000001.of", [])[0]) == ["000001.OF"]
+    assert fund_candidates(funds, " ", ["000079.OF"])[0] == {"000079.OF": "Alpha基金79"}
+
+
 def test_search_pending_changes_and_navigation_preserve_results(page):
     app, _ = page
     assert traces(app) == []
     assert app.selectbox(key="fund_choice").value is None
+    assert app.selectbox(key="fund_choice").options == []
+    assert app.text_input(key="fund_keyword").value == ""
     assert app.text_input(key="fund_code").value == ""
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     assert app.text_input(key="fund_code").value == "000001.OF"
     app.button(key="submit_query").click().run()
     first = traces(app)
@@ -86,9 +111,54 @@ def test_search_pending_changes_and_navigation_preserve_results(page):
     assert any("点击查询加载分红记录" in item.value for item in app.caption)
 
 
+def test_keyword_search_limits_browser_options_and_preserves_selections(page):
+    app, path = page
+    codes = [f"{100000 + i:06}.OF" for i in range(80)]
+    with connect(path) as db:
+        db.executemany("INSERT INTO fund_basic(ts_code,name) VALUES (?,?)",
+                       [(code, f"大样本基金{i}") for i, code in enumerate(codes)])
+        db.executemany("INSERT INTO fund_nav(ts_code,nav_date,ann_date,unit_nav,accum_nav,adj_nav) "
+                       "VALUES (?,'2020-01-03','2020-01-03',1,1,1)", [(code,) for code in codes])
+    app.run()
+    assert app.selectbox(key="fund_choice").options == []
+    app.text_input(key="fund_keyword").set_value("大样本").run()
+    assert len(app.selectbox(key="fund_choice").options) == 50
+    assert app.selectbox(key="fund_choice").proto.ByteSize() < 20_000
+    assert any("显示前 50 条" in item.value for item in app.caption)
+    app.selectbox(key="fund_choice").select(codes[0]).run()
+    app.button(key="submit_query").click().run()
+    chart = traces(app)
+    app.text_input(key="fund_keyword").set_value("样本甲").run()
+    assert len(app.selectbox(key="fund_choice").options) == 2
+    assert app.selectbox(key="fund_choice").value == codes[0]
+    assert app.text_input(key="fund_code").value == codes[0]
+    assert traces(app) == chart
+    assert not any("条件已修改" in item.value for item in app.info)
+    app.text_input(key="fund_keyword").set_value("").run()
+    assert len(app.selectbox(key="fund_choice").options) == 1
+    app.text_input(key="fund_keyword").set_value("无匹配关键词").run()
+    assert app.selectbox(key="fund_choice").value == codes[0]
+    assert any("未找到匹配基金" in item.value for item in app.caption)
+    app.text_input(key="fund_code").set_value("000002").run()
+    assert app.selectbox(key="fund_choice").value == "000002.OF"
+    assert app.session_state["query_result"]["code"] == codes[0]
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    assert app.multiselect(key="comparison_codes").options == []
+    select_comparison(app, [codes[0], "000001.OF"])
+    app.text_input(key="comparison_keyword").set_value("").run()
+    assert app.multiselect(key="comparison_codes").value == [codes[0], "000001.OF"]
+    assert len(app.multiselect(key="comparison_codes").options) == 2
+    app.text_input(key="comparison_keyword").set_value("无匹配关键词").run()
+    assert app.multiselect(key="comparison_codes").value == [codes[0], "000001.OF"]
+    app.radio(key="workspace_page").set_value("基金分析").run()
+    assert app.text_input(key="fund_keyword").value == "无匹配关键词"
+    assert app.selectbox(key="fund_choice").value == "000002.OF"
+    assert traces(app) == chart
+
+
 def test_custom_dates_curves_overview_and_detail_columns(page):
     app, path = page
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     app.segmented_control(key="time_range").select("自定义").run()
     assert app.date_input(key="custom_start").proto.min == "2020-01-01"
     assert app.date_input(key="custom_end").proto.max == "2020-01-03"
@@ -113,7 +183,7 @@ def test_custom_dates_curves_overview_and_detail_columns(page):
     assert any(m.value == "**投资类型:** 混合型" for m in app.markdown)
     assert any(m.value == "**业绩比较基准:** 测试指数收益率×80%+债券指数收益率×20%" for m in app.markdown)
     assert not any("**样本甲**" in m.value for m in app.markdown)
-    assert any("离任日期未提供不代表仍在任职" in c.value for c in app.caption)
+    assert any("按任职日期倒序展示" in c.value for c in app.caption)
     dividends = app.session_state["query_result"]["details"]["dividends"]
     assert len(dividends) == 3
     assert [row["div_proc"] for row in dividends[:2]] == ["实施", "预案"]
@@ -166,7 +236,7 @@ def test_peer_returns_render_fixed_periods_and_preserve_submitted_results(page, 
         return original(service, code, *args, **kwargs)
 
     monkeypatch.setattr(FundService, "get_peer_returns", query)
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     assert calls == []
     app.button(key="submit_query").click().run()
     assert not app.exception
@@ -210,7 +280,7 @@ def test_invalid_conditions_empty_data_and_storage_failure_keep_empty_chart(page
     app.button(key="submit_query").click().run()
     assert app.error and traces(app) == []
     app.multiselect(key="nav_types").set_value(["unit_nav"]).run()
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     app.segmented_control(key="time_range").select("自定义").run()
     app.date_input(key="custom_start").set_value(date(2020, 1, 3)).run()
     app.date_input(key="custom_end").set_value(date(2020, 1, 1)).run()
@@ -230,7 +300,7 @@ def test_metrics_do_not_depend_on_curve_selection(page):
     app, path = page
     with connect(path) as db:
         db.execute("UPDATE fund_nav SET adj_nav=unit_nav WHERE ts_code='000001.OF'")
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     app.button(key="submit_query").click().run()
     metrics = app.session_state["query_result"]["metrics"]
     data = traces(app)
@@ -248,7 +318,7 @@ def test_metrics_do_not_depend_on_curve_selection(page):
     app.multiselect(key="nav_types").set_value(["adj_nav", "accum_nav"]).run()
     app.button(key="submit_query").click().run()
     assert app.session_state["query_result"]["metrics"] == metrics
-    assert any("该区间不足一年" in w.value for w in app.warning)
+    assert any("统计区间不足一年" in c.value for c in app.caption)
     assert not app.exception
 
 
@@ -288,7 +358,7 @@ def test_ifind_name_update_preserves_fund_when_changing_quick_range(page, monkey
     service = Service()
     monkeypatch.setattr("app.bootstrap.create_service", lambda source: service)
     app.radio(key="data_source").set_value("ifind").run()
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     app.multiselect(key="nav_types").set_value(["unit_nav"]).run()
     original_label = app.selectbox(key="fund_choice").options[0]
     assert app.segmented_control(key="time_range").value == "近1年"
@@ -318,21 +388,21 @@ def test_comparison_page_multi_fund_dates_and_navigation(page):
         db.execute("INSERT INTO fund_basic(ts_code,name,found_date) VALUES ('000003.OF','样本丙','2019-01-01')")
         db.execute("INSERT INTO fund_nav SELECT '000003.OF',ann_date,nav_date,unit_nav,accum_nav,adj_nav,accum_div FROM fund_nav WHERE ts_code='000001.OF'")
         db.execute("UPDATE fund_nav SET adj_nav=unit_nav")
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     app.button(key="submit_query").click().run()
     original = traces(app)
     app.radio(key="workspace_page").set_value("基金对比").run()
     assert traces(app) == []
     assert app.multiselect(key="comparison_codes").value == []
     codes = ["000001.OF", "000002.OF"]
-    app.multiselect(key="comparison_codes").set_value(codes).run()
+    select_comparison(app, codes)
     app.button(key="submit_comparison").click().run()
     assert len(traces(app)) == 2 and all(t["connectgaps"] is False for t in traces(app))
     assert app.dataframe[0].value.shape == (7, 3)
     result = app.session_state["comparison_result"]
     assert result["start_date"] == "2020-01-01" and result["end_date"] == "2020-01-03"
     assert result["cumulative_returns"].iloc[0, 1:].eq(0).all()
-    app.multiselect(key="comparison_codes").set_value([*codes, "000003.OF"]).run()
+    select_comparison(app, [*codes, "000003.OF"])
     assert len(traces(app)) == 2
     assert any("上次对比结果" in i.value for i in app.info)
     app.radio(key="workspace_page").set_value("数据说明").run()
@@ -355,15 +425,15 @@ def test_comparison_page_handles_gaps_invalid_ranges_and_storage_failure(page, m
     app, path = page
     app.radio(key="workspace_page").set_value("基金对比").run()
     codes = ["000001.OF", "000002.OF"]
-    app.multiselect(key="comparison_codes").set_value(codes).run()
+    select_comparison(app, codes)
     app.button(key="submit_comparison").click().run()
     assert traces(app) == [] and any("没有共同净值区间" in e.value for e in app.error)
-    app.multiselect(key="comparison_codes").set_value(codes[:1]).run()
+    select_comparison(app, codes[:1])
     app.button(key="submit_comparison").click().run()
     assert traces(app) == [] and any("至少选择两只" in e.value for e in app.error)
     with connect(path) as db:
         db.execute("UPDATE fund_nav SET nav_date=nav_date-INTERVAL '1 year', ann_date=ann_date-INTERVAL '1 year', adj_nav=unit_nav WHERE ts_code='000002.OF'")
-    app.multiselect(key="comparison_codes").set_value(codes).run()
+    select_comparison(app, codes)
     app.button(key="submit_comparison").click().run()
     result = app.session_state["comparison_result"]
     assert result["metrics"]["000001.OF"] is None
@@ -416,7 +486,7 @@ def test_source_switch_clears_both_results_preserves_code_and_queries_only_on_su
         }]}
 
     monkeypatch.setattr(IfindClient, "query", query)
-    app.selectbox(key="fund_choice").select("000001.OF").run()
+    select_fund(app, "000001.OF")
     app.button(key="submit_query").click().run()
     assert app.session_state["query_result"]["source"] == "tushare"
     app.session_state["comparison_result"] = {"old": True}
@@ -446,7 +516,7 @@ def test_source_switch_clears_both_results_preserves_code_and_queries_only_on_su
     app.button(key="submit_query").click().run()
     assert len(traces(app)) == 3 and app.session_state["query_result"]["start"] is None
     app.radio(key="workspace_page").set_value("基金对比").run()
-    app.multiselect(key="comparison_codes").set_value(["000001.OF"]).run()
+    select_comparison(app, ["000001.OF"])
     app.text_input(key="comparison_manual_codes").set_value("003349").run()
     app.segmented_control(key="comparison_time_range").select("自定义").run()
     app.date_input(key="comparison_custom_start").set_value(date(2020, 1, 1)).run()

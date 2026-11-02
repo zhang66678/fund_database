@@ -84,3 +84,43 @@ def test_decimal_write_uses_schema_precision(tmp_path):
         assert db.execute("SELECT unit_nav,adj_nav FROM fund_nav ORDER BY nav_date").fetchall() == [
             (Decimal("1.1234567800"), None), (Decimal("10.0758720000"), None)]
         assert write_batch(db, {"fund_nav": frame})["fund_nav"] == {"inserted": 0, "updated": 0, "unchanged": 2}
+
+
+def test_repository_reuses_history_without_stale_or_mutable_results(tmp_path, monkeypatch):
+    """改区间不重复读库, 写库后原实例自动读到新数据, 调用方修改不污染缓存."""
+    from datetime import date
+    from database import duckdb_repository
+
+    path = tmp_path / "cached.duckdb"
+    with connect(path) as db:
+        initialize(db)
+        db.execute("INSERT INTO fund_basic(ts_code,name) VALUES ('000001.OF','原名称')")
+        db.execute("INSERT INTO fund_nav(ts_code,nav_date,ann_date,unit_nav) VALUES "
+                   "('000001.OF','2020-01-02','2020-01-03',1),('000001.OF','2020-01-03','2020-01-04',1.2)")
+    reads = []
+    original = duckdb_repository.connect
+
+    def tracked_connect(*args, **kwargs):
+        reads.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(duckdb_repository, "connect", tracked_connect)
+    repo = DuckDBFundRepository(path)
+    assert repo.list_available_funds() == {"000001.OF": "原名称"}
+    repo.get_nav("000001.OF")
+    frame = repo.get_nav("000001.OF", date(2020, 1, 3), date(2020, 1, 3))
+    assert frame.unit_nav.tolist() == [1.2]
+    frame.loc[0, "unit_nav"] = 999
+    assert repo.get_nav("000001.OF").unit_nav.tolist() == [1, 1.2]
+    assert repo.list_available_funds() == {"000001.OF": "原名称"}
+    assert len(reads) == 2
+    # 缓存不持有连接, 后续可以正常打开写连接, 文件变化后无须重建 Repository.
+    with connect(path) as db:
+        db.execute("UPDATE fund_basic SET name='新名称'")
+        db.execute("UPDATE fund_nav SET unit_nav=2 WHERE nav_date='2020-01-03'")
+    assert repo.get_nav("000001.OF").unit_nav.tolist() == [1, 2]
+    assert repo.list_available_funds() == {"000001.OF": "新名称"}
+    assert len(reads) == 4
+    path.unlink()
+    with pytest.raises(OSError, match="数据库读取失败"):
+        repo.get_nav("000001.OF")

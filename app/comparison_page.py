@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.bootstrap import create_service
+from app.fund_search import fund_candidates
 from app.components import METRICS, choice_code, fund_option_labels, remember_query, show_date_filters, show_query_source, style_chart
 
 
@@ -132,9 +133,9 @@ def _show_performance(result: dict | None) -> None:
         for code, error in result["errors"].items():
             st.warning(f"{result['funds'][code]} ({code}): {error}")
         if any(item and item["short_period"] for item in result["metrics"].values()):
-            st.warning("该区间不足一年, 年化结果可能被放大, 请结合实际区间查看.")
+            st.caption("统计区间不足一年.")
         with st.expander("指标计算口径"):
-            st.caption("累计收益与指标沿用 SSE 开市日口径, 特殊基金的实际适用日历需单独核查. 无法计算表示样本或风险分母不满足计算条件.")
+            st.caption("累计收益与指标使用 SSE 开市日. 无法计算表示样本或风险分母不满足计算条件.")
             for code, payload in result["metrics"].items():
                 if payload is None:
                     continue
@@ -160,13 +161,22 @@ def show_comparison_page() -> None:
     selected = st.session_state.get("comparison_codes", draft["codes"])
     st.session_state.comparison_codes = [code for code in selected if code in funds]
     draft["codes"] = list(st.session_state.comparison_codes)
-    labels = fund_option_labels(funds)
     with st.container(border=True, key="comparison_search"):
-        codes = st.multiselect(
-            "选择对比基金", options=list(funds), key="comparison_codes", disabled=not funds,
-            format_func=labels.get, placeholder="按代码或名称选择两只及以上基金",
-            on_change=remember_query, args=("codes", "comparison_codes", "comparison_draft"),
+        if "comparison_keyword" not in st.session_state:
+            st.session_state.comparison_keyword = draft.get("keyword", "")
+        keyword = st.text_input(
+            "搜索对比基金", key="comparison_keyword", placeholder="代码或名称, 按 Enter 搜索",
+            on_change=remember_query, args=("keyword", "comparison_keyword", "comparison_draft"),
         )
+        candidates, note = fund_candidates(funds, keyword, st.session_state.comparison_codes)
+        labels = fund_option_labels(candidates)
+        codes = st.multiselect(
+            "选择对比基金", options=list(candidates), key="comparison_codes", disabled=not candidates,
+            format_func=labels.get, placeholder="从搜索结果分次添加两只及以上基金",
+            on_change=remember_query, args=("codes", "comparison_codes", "comparison_draft"),
+            filter_mode="contains",
+        )
+        st.caption(note)
         if st.session_state.data_source == "ifind":
             if "comparison_manual_codes" not in st.session_state:
                 st.session_state.comparison_manual_codes = draft.get("manual_codes", "")

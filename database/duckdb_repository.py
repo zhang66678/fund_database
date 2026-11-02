@@ -10,16 +10,44 @@ from database.connection import DATABASE_PATH, connect
 
 
 class DuckDBFundRepository:
-    """每次查询打开并关闭只读连接, 页面不持有长期数据库连接."""
+    """复用少量只读结果, 缓存未命中时打开并关闭连接, 不持有长期连接."""
 
     def __init__(self, path: Path = DATABASE_PATH) -> None:
         self._path = path
+        self._cache = {}
+        self._cache_version = None
 
-    def _query(self, sql: str, params: list | None = None) -> pd.DataFrame:
+    def _file_version(self) -> tuple:
+        """主文件或 WAL 改变后丢弃缓存, 不持有数据库连接或阻塞后续更新."""
+        info = self._path.stat()
+        version = [(info.st_mtime_ns, info.st_size)]
         try:
+            wal = self._path.with_name(self._path.name + ".wal").stat()
+            version.append((wal.st_mtime_ns, wal.st_size))
+        except FileNotFoundError:
+            version.append(None)
+        return tuple(version)
+
+    def _query(self, sql: str, params: list | None = None, *, cache: bool = True) -> pd.DataFrame:
+        try:
+            version = self._file_version()
+            if version != self._cache_version:
+                self._cache.clear()
+                self._cache_version = version
+            key = (sql, tuple(tuple(value) if isinstance(value, list) else value for value in (params or [])))
+            if cache and key in self._cache:
+                return self._cache[key].copy()
             with connect(self._path, read_only=True) as connection:
-                return connection.execute(sql, params or []).fetchdf()
-        except duckdb.Error as exc:
+                frame = connection.execute(sql, params or []).fetchdf()
+            if cache:
+                # 仅保留最近的少量查询结果, 返回副本避免页面修改污染缓存.
+                if len(self._cache) >= 64:
+                    self._cache.pop(next(iter(self._cache)))
+                self._cache[key] = frame
+                return frame.copy()
+            return frame
+        except (duckdb.Error, OSError) as exc:
+            self._cache.clear()
             # 将存储异常统一为读取失败, 页面无需导入 DuckDB.
             raise OSError("数据库读取失败, 请检查路径, 初始化状态或其他写入进程") from exc
 
@@ -65,30 +93,35 @@ class DuckDBFundRepository:
             )
             SELECT ts_code, nav_date, CAST(adj_nav AS DOUBLE) AS adj_nav
             FROM versions WHERE version_rank = 1 ORDER BY ts_code, nav_date
-        ''', [ts_code, sorted(set(dates))])
+        ''', [ts_code, sorted(set(dates))], cache=False)
 
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
         end_date: date | None = None,
     ) -> pd.DataFrame:
-        """按日期闭区间读取最新公告版本, 金额转浮点供服务层计算."""
+        """复用单基金最新公告版历史净值, 在内存按日期闭区间截取."""
         if start_date is not None and end_date is not None and start_date > end_date:
             raise ValueError("start_date must not be later than end_date")
-        # 主键保证相同公告版本唯一, 日期条件与代码全部参数化.
-        return self._query('''
+        # 主键保证相同公告版本唯一, 基金代码参数化, 日期在内存筛选.
+        frame = self._query('''
             WITH versions AS (
                 SELECT nav_date, unit_nav, accum_nav, adj_nav,
                        ROW_NUMBER() OVER (
                            PARTITION BY nav_date ORDER BY ann_date DESC NULLS LAST
                        ) AS version_rank
                 FROM fund_nav
-                WHERE ts_code = ? AND nav_date >= ? AND nav_date <= ?
+                WHERE ts_code = ?
             )
             SELECT nav_date, CAST(unit_nav AS DOUBLE PRECISION) AS unit_nav,
                    CAST(accum_nav AS DOUBLE PRECISION) AS accum_nav,
                    CAST(adj_nav AS DOUBLE PRECISION) AS adj_nav
             FROM versions WHERE version_rank = 1 ORDER BY nav_date
-        ''', [ts_code, start_date or date.min, end_date or date.max])
+        ''', [ts_code])
+        if start_date is not None:
+            frame = frame.loc[frame.nav_date.ge(pd.Timestamp(start_date))]
+        if end_date is not None:
+            frame = frame.loc[frame.nav_date.le(pd.Timestamp(end_date))]
+        return frame.reset_index(drop=True)
 
     def get_calendar(self) -> pd.DataFrame:
         """返回含休市日的完整 SSE 日历, 供服务层检查缺口."""

@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+import streamlit as st
+
 from database.csv_repository import CsvFundRepository
 from database.connection import DATABASE_PATH, ROOT
 from database.duckdb_repository import DuckDBFundRepository
@@ -10,9 +12,8 @@ from services.fund_service import FundService
 
 
 def create_service(source: str = "tushare") -> FundService:
-    """根据页面选择组装服务, iFinD 客户端在浏览器会话内复用."""
+    """在浏览器会话内复用本地查询缓存和 iFinD 客户端."""
     if source == "ifind":
-        import streamlit as st
         from api.ifind_client import IfindClient
         from database.ifind_repository import IfindFundRepository
 
@@ -26,7 +27,11 @@ def create_service(source: str = "tushare") -> FundService:
         raise ValueError("未知数据源")
     nav_setting = os.environ.get("NAV_CSV")
     if not nav_setting:
-        return FundService(DuckDBFundRepository(_database_path()))
+        path = _database_path()
+        cached = st.session_state.get("_local_service")
+        if cached is None or cached[0] != str(path):
+            st.session_state["_local_service"] = (str(path), FundService(DuckDBFundRepository(path)))
+        return st.session_state["_local_service"][1]
     path = Path(nav_setting)
     if not path.is_absolute():
         path = ROOT / path

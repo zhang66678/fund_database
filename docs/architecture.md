@@ -49,7 +49,7 @@ Tushare Pro
 
 实现：
 
-- `DuckDBFundRepository`：默认实现，每次查询打开只读连接。
+- `DuckDBFundRepository`: 默认实现, 缓存少量只读结果, 主文件或 WAL 变化时失效. 未命中时打开并关闭只读连接, 单基金历史净值复用于不同区间查询.
 - `CsvFundRepository`：对照实现，仅支持净值、名称、日历和基础资料。
 - `IfindFundRepository`：通过 `api.ifind_client` 在线查询基金资料和净值，不入库；本地名单只供代码选择，SSE 日历供现有指标计算。
 
@@ -81,7 +81,7 @@ Tushare Pro
 
 命令入口为 `scripts/update_fund_list.py`。
 
-`api/ifind_client.py` 负责 HTTP 鉴权、请求、错误提示和 10 分钟内存缓存。`app/bootstrap.py` 根据会话中的数据源选择组装服务，iFinD 客户端在当前浏览器会话复用，页面和服务不直接请求接口。
+`api/ifind_client.py` 负责 HTTP 鉴权、请求、错误提示和 10 分钟内存缓存。`app/bootstrap.py` 根据会话中的数据源选择组装服务, DuckDB 服务及 iFinD 客户端在当前浏览器会话复用, 页面和服务不直接请求接口.
 
 ## 目录职责
 
