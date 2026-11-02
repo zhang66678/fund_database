@@ -2,6 +2,12 @@
 
 
 TABLES = {
+    "fund_category": {
+        "columns": {"ts_code": "VARCHAR", "source": "VARCHAR", "snapshot_date": "DATE",
+                    "category": "VARCHAR", "class_level1": "VARCHAR",
+                    "class_level2": "VARCHAR", "class_level3": "VARCHAR"},
+        "key": ("ts_code", "source", "snapshot_date"),
+    },
     "fund_basic": {
         "columns": {
             **dict.fromkeys("ts_code name management custodian fund_type".split(), "VARCHAR"),

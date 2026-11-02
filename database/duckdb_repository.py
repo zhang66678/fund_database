@@ -33,6 +33,40 @@ class DuckDBFundRepository:
         ''')
         return dict(zip(frame.ts_code, frame.name))
 
+    def get_peer_category(self, ts_code: str) -> pd.DataFrame:
+        """每只基金使用最近采集的 iFinD 二级分类, 最新缺失时不回退旧分类."""
+        exists = self._query("SELECT 1 FROM information_schema.tables WHERE table_name='fund_category'")
+        if exists.empty:
+            return pd.DataFrame(columns=["category", "source", "snapshot_date",
+                                         "class_level1", "class_level2", "class_level3"])
+        frame = self._query('''
+            SELECT category, source, snapshot_date, class_level1, class_level2, class_level3
+            FROM fund_category WHERE ts_code = ? AND source = 'ifind'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY snapshot_date DESC) = 1
+        ''', [ts_code])
+        return frame.loc[frame.category.notna() & frame.category.str.strip().ne("")].reset_index(drop=True)
+
+    def get_peer_nav_points(self, ts_code: str, dates: list[date]) -> pd.DataFrame:
+        """单次查询同类基金指定日期的复权净值, 避免逐只扫描完整历史."""
+        if not dates:
+            return pd.DataFrame(columns=["ts_code", "nav_date", "adj_nav"])
+        return self._query('''
+            WITH categories AS (
+                SELECT ts_code, category FROM fund_category WHERE source = 'ifind'
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY snapshot_date DESC) = 1
+            ), versions AS (
+                SELECT n.ts_code, n.nav_date, n.adj_nav,
+                       ROW_NUMBER() OVER (PARTITION BY n.ts_code, n.nav_date
+                                          ORDER BY n.ann_date DESC NULLS LAST) AS version_rank
+                FROM fund_nav n JOIN categories c ON n.ts_code = c.ts_code
+                JOIN fund_basic b ON n.ts_code = b.ts_code
+                WHERE c.category = (SELECT category FROM categories WHERE ts_code = ?)
+                  AND n.nav_date IN (SELECT unnest(?::DATE[]))
+            )
+            SELECT ts_code, nav_date, CAST(adj_nav AS DOUBLE) AS adj_nav
+            FROM versions WHERE version_rank = 1 ORDER BY ts_code, nav_date
+        ''', [ts_code, sorted(set(dates))])
+
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
         end_date: date | None = None,

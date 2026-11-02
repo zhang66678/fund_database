@@ -6,6 +6,7 @@ import re
 import pandas as pd
 
 from api.ifind_client import IfindClient
+from api.ifind_categories import SOURCE, fetch_categories
 from database.repository import ASSET_COLUMNS, BASIC_COLUMNS, DIVIDEND_COLUMNS, MANAGER_COLUMNS, NAV_COLUMNS
 
 
@@ -41,6 +42,17 @@ class IfindFundRepository:
     def get_calendar(self) -> pd.DataFrame:
         """首版显式复用本地 SSE 日历, 不视作 iFinD 基金数据."""
         return self._reference.get_calendar()
+
+    def get_peer_category(self, ts_code: str) -> pd.DataFrame:
+        """读取 iFinD 投资类型, 保留各层级, 不将运作形式用作同类分组."""
+        frame = fetch_categories(self._client, [ts_code])
+        fetched_at = frame.attrs.get("fetched_at")
+        frame["source"] = SOURCE
+        frame["snapshot_date"] = pd.Timestamp(fetched_at).date() if fetched_at else date.today()
+        return frame.loc[frame.category.notna()].reset_index(drop=True)
+
+    def get_peer_nav_points(self, ts_code: str, dates: list[date]) -> pd.DataFrame:
+        raise ValueError("iFinD 模式已支持分类查询, 暂未接入同类基金批量净值比较, 请切换本地数据源")
 
     def _basic(self, ts_code: str, indicators: dict[str, list[str]]) -> pd.DataFrame:
         """读取单基金的基础指标, 保留接口未提供的值."""

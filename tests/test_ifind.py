@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from api.ifind_client import IfindClient
+from api.ifind_categories import CATEGORY_FIELDS
 from database.ifind_repository import IfindFundRepository
 from services.fund_service import FundService
 
@@ -27,6 +28,8 @@ def http(monkeypatch):
             rank = int(items[0]["indiparams"][1]) if items[0]["indicator"] == "ths_service_start_fund" else 1
             values = {
                 "ths_fund_short_name_fund": "接口样本", "ths_fund_establishment_date_fund": "20260921",
+                "ths_invest_type_first_classi_fund": "混合型",
+                "ths_invest_type_second_classi_fund": "灵活配置型", "ths_tzlxsjfl_fund": None,
                 "ths_fund_manager_current_fund": "经理甲,经理乙",
                 "ths_fund_manager_his_fund": "经理旧(20260921-20260922) 经理甲(20260922-至今) 经理乙(20260923-至今)",
                 "ths_service_start_fund": "经理乙(2026-09-23)" if rank == 1 else "经理甲(2026-09-22)",
@@ -83,6 +86,19 @@ def test_http_data_feeds_existing_metrics_and_cache_preserves_missing_values(htt
     assert pd.isna(details["basic"]["fund_type"])
     assert details["errors"] == {}
     assert service.list_available_funds()["003349.OF"] == "接口样本"
+
+
+def test_ifind_classification_uses_existing_client_and_cache(http):
+    repo = IfindFundRepository(IfindClient(), Reference())
+    frame = repo.get_peer_category("000001.OF")
+    assert frame.category.tolist() == ["混合型 / 灵活配置型"]
+    assert frame.source.tolist() == ["ifind"]
+    assert frame.class_level3.isna().all()
+    assert {item["indicator"] for item in http[-1][1]["indipara"]} == set(CATEGORY_FIELDS)
+    assert all(item["indiparams"] == [] for item in http[-1][1]["indipara"])
+    frame.loc[0, "category"] = "修改显示副本"
+    assert repo.get_peer_category("000001.OF").category.tolist() == ["混合型 / 灵活配置型"]
+    assert [endpoint for endpoint, _ in http] == ["get_access_token", "basic_data_service"]
 
 
 def test_cache_expiry_reloads_data_and_keeps_token_in_memory(http, monkeypatch):

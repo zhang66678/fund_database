@@ -16,6 +16,22 @@ DIVIDEND_COLUMNS = ["ann_date", "ex_date", "record_date", "pay_date", "div_cash"
 class FundRepository(Protocol):
     """不同存储实现遵守相同方法和返回约定, 由调用方注入具体实现."""
 
+    def get_peer_category(self, ts_code: str) -> pd.DataFrame:
+        """返回最新二级分类的 category, source, snapshot_date, 无匹配返回空表.
+
+        附带 class_level1, class_level2, class_level3 原文, 分组固定使用一级/二级路径.
+        未支持同类比较的来源抛出 ValueError, 不自动混用其他净值来源.
+        """
+        ...
+
+    def get_peer_nav_points(self, ts_code: str, dates: list[date]) -> pd.DataFrame:
+        """批量返回同一细分类的 ts_code, nav_date, adj_nav, 每日取最新公告版本.
+
+        只含本地基金, 不按当前存续状态排除历史基金; 不补齐缺失日期或净值.
+        分类使用每只基金最近的采集结果, 不宣称还原历史时点分类.
+        """
+        ...
+
     def get_nav(
         self, ts_code: str, start_date: date | None = None,
         end_date: date | None = None,

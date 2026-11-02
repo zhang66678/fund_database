@@ -9,6 +9,7 @@
 | `python -m scripts.init_database` | 创建数据库和缺失的表 | 否 |
 | `python -m scripts.init_database --snapshot <目录>` | 从单基金快照建库并导入 | 否 |
 | `python -m scripts.update_fund_list` | 更新场外基金总名单快照 | 是 |
+| `python -m scripts.update_fund_categories` | 通过 iFinD 获取投资类型分类并独立入库 | 否, 请求 iFinD |
 | `python -m scripts.add_fund <代码>` | 添加一只场外基金的基础资料 | 是 |
 | `python -m scripts.add_fund --file <csv>` | 批量添加基础资料 | 是（仅新代码） |
 | `python -m scripts.add_fund --from-list` | 从本地总名单生成批次 CSV | 否 |
@@ -31,6 +32,29 @@
 - `--run-dir` 可指定输出目录，便于复现或重跑。
 - 不读取数据库，不写数据库；日志在 `logs/fund_list.log`。
 - `scripts.add_fund --from-list` 和研究脚本默认使用最新完整快照。
+
+## 更新基金细分类
+
+```powershell
+# 先停止 Streamlit, 再使用已配置的 iFinD 客户端读取分类并写入分类表
+.\.venv\Scripts\python.exe -m scripts.update_fund_categories
+
+# 先验证少量基金, 只保存分类快照, 不修改数据库
+.\.venv\Scripts\python.exe -m scripts.update_fund_categories --codes 000001 000003 --snapshot-only
+
+# 只更新指定的已入库基金
+.\.venv\Scripts\python.exe -m scripts.update_fund_categories --codes 000001 000003
+```
+
+- 分类来自既有 iFinD `basic_data_service`, 复用 `IfindClient` 的鉴权和缓存, 凭证配置见 [iFinD 数据源](data-sources.md#ifind).
+- 读取投资类型一级, 二级和三级原文; 分组固定采用 `一级 / 二级`, 不使用运作形式, 不回退三级或第三方分类.
+- 默认查询全部本地基金, 每次请求 20 只; `--codes` 指定范围, `--batch-size` 可调整为 1 至 100, 实际配额和权限由账号决定. 首次建议先运行少量基金的快照模式.
+- 默认保存 `data/fund_categories/时间戳/fund_categories.csv` 和 `summary.json`; `--run-dir` 可指定未存在的目录.
+- 分类独立写入 `fund_category`, 不覆盖 Tushare 的 `fund_type`, `invest_type` 或净值数据.
+- 按来源, 基金代码和获取日期保留快照, 同日重跑更新所选基金的同日记录; 其他基金不受影响. 同类查询使用每只基金最近采集的分类, 各基金获取日期可能不同.
+- 一级或二级缺失, 或接口未返回该代码时, 保留原始层级及空分组记录; 不沿用旧分类, 不补齐为 Tushare 大类. 摘要分别统计已分类和缺失数量.
+- 全部批次获取并校验成功后才写库, 获取失败不提交部分分类, 写入失败整批回滚; 网络请求期间不持有数据库写连接.
+- 分类为获取时的当前分类, 不宣称还原历史时点的分类. 模拟响应验证不能代替账号权限及真实返回值验证.
 
 ## 初始化
 

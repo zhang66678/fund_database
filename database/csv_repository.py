@@ -68,6 +68,12 @@ class CsvFundRepository:
         """旧 CSV 对照模式尚未提供经理资料, 不混用数据库数据."""
         raise ValueError("CSV 对照模式暂不提供基金经理资料")
 
+    def get_peer_category(self, ts_code: str) -> pd.DataFrame:
+        raise ValueError("CSV 对照模式暂不提供细分类同类比较")
+
+    def get_peer_nav_points(self, ts_code: str, dates: list[date]) -> pd.DataFrame:
+        raise ValueError("CSV 对照模式暂不提供细分类同类比较")
+
     def get_basic(self, ts_code: str) -> pd.DataFrame:
         """从同一份基金名单读取资料, 旧名单没有的字段保持缺失."""
         if self._names_path is None:

@@ -9,6 +9,7 @@ import pandas as pd
 
 from database.repository import FundRepository, NAV_COLUMNS
 from services.fund_metrics import calculate_metrics
+from services.peer_returns import get_peer_returns
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,10 @@ class FundService:
         """指标始终采用复权净值, 不受页面勾选的曲线类型影响."""
         nav = self.get_nav(ts_code, start_date, end_date, ["adj_nav"])
         return calculate_metrics(nav, self._repository.get_calendar())
+
+    def get_peer_returns(self, ts_code: str, as_of: date | None = None) -> dict:
+        """固定周期涨幅与细分类本地比较, 独立于图表所选区间和日频指标."""
+        return get_peer_returns(self._repository, _normalize_code(ts_code), as_of or date.today())
 
     def get_performance_series(
         self, ts_code: str, start_date: date | None = None, end_date: date | None = None,
