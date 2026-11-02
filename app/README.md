@@ -24,7 +24,7 @@
 
 | 页面 | 内容 |
 | --- | --- |
-| 基金分析 | 单基金净值、累计收益、回撤、绩效、分红、经理、资产 |
+| 基金分析 | 单基金净值、累计收益、回撤、绩效、分红、涨幅与同类比较、经理、资产 |
 | 基金对比 | 多基金共同区间累计收益与绩效对照 |
 | 数据说明 | 页面内展示的数据口径与限制 |
 
@@ -60,10 +60,17 @@
 
 资料读取失败时只影响对应卡片，不影响其他板块。
 
+### 涨幅与同类比较
+
+- 表格按阶段（近一周至近三年、今年来）、季度（最新净值日所在季度及之前七季）、年度（当年及之前八年）展示涨幅、同类平均、排名和四分位，以复权净值首尾比值计算，不年化，不受图表区间影响。
+- 同类取本基金最近一次采集的 iFinD `一级 / 二级` 分类；同类平均为有效样本等权平均并包含本基金，至少 2 只有效样本提供排名，至少 4 只提供四分位。
+- 数据不足或周期边界缺失显示 `—`，鼠标悬停单元格可查看实际区间和原因；当前季度和年度截至最新净值日。
+- 仅本地 DuckDB 模式计算，iFinD 在线和 CSV 对照模式提示暂不支持。口径见 [指标与对比](../docs/metrics.md)。
+
 ### 提交行为
 
 - 修改基金、日期或曲线后，页面提示“条件已修改”，但仍展示上次结果。
-- 点击“查询”后统一更新概览、图表、绩效和资料。
+- 点击“查询”后统一更新概览、图表、绩效、涨幅与同类比较和资料。
 - 查询失败时清除旧结果并显示原因。
 
 ## 基金对比
@@ -128,6 +135,7 @@ Remove-Item Env:NAV_CSV, Env:FUND_NAMES_CSV, Env:CALENDAR_CSV -ErrorAction Silen
 | `bootstrap.py` | 根据所选来源及环境变量组装服务，复用会话内 iFinD 客户端 |
 | `streamlit_app.py` | 单基金页面编排、查询调度、会话状态 |
 | `comparison_page.py` | 对比页面编排和独立会话状态 |
+| `peer_returns_panel.py` | 涨幅与同类比较表格，仅格式化服务结果 |
 | `components.py` | 导航、搜索、筛选、概览、图表、绩效和资料卡片 |
 | `styles.css` | 卡片、导航和窄屏布局补充 |
 | `../.streamlit/config.toml` | Streamlit 全局主题 |
@@ -137,7 +145,7 @@ Remove-Item Env:NAV_CSV, Env:FUND_NAMES_CSV, Env:CALENDAR_CSV -ErrorAction Silen
 ## 验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_ifind.py tests/test_streamlit_app.py tests/test_fund_service.py tests/test_fund_metrics.py -q
+.\.venv\Scripts\python.exe -m pytest tests/test_ifind.py tests/test_streamlit_app.py tests/test_fund_service.py tests/test_fund_metrics.py tests/test_peer_returns.py -q
 ```
 
 页面测试使用临时 DuckDB，覆盖查询、筛选、未提交提示、会话状态、数据缺口、无共同区间和读取失败。

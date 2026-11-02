@@ -9,6 +9,7 @@ import streamlit as st
 
 from app.bootstrap import create_service
 from app.comparison_page import show_comparison_page
+from app.peer_returns_panel import show_peer_returns
 from app.components import (
     choice_code, show_chart, show_data_notes, show_details, show_dividends, show_filters,
     show_navigation, show_overview, show_performance, show_search, show_query_source,
@@ -62,6 +63,7 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
                 "selected": list(conditions["selected"]), "nav": nav,
                 "details": details, "metrics": None, "metrics_error": None,
                 "performance_series": None, "series_error": None,
+                "peer_returns": None, "peer_returns_error": None,
                 "fetched_at": nav.attrs.get("fetched_at"),
             }
             for dataset, error in details["errors"].items():
@@ -82,6 +84,13 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
                 except (ValueError, OSError, UnicodeError) as exc:
                     logger.warning("Metrics unavailable: %s", exc)
                     result["metrics_error"] = str(exc)
+                if conditions["source"] != "ifind":
+                    try:
+                        # 固定周期独立于图表区间, 仅在用户提交时计算一次.
+                        result["peer_returns"] = service.get_peer_returns(code)
+                    except (ValueError, OSError, UnicodeError) as exc:
+                        logger.warning("Peer returns unavailable: %s", exc)
+                        result["peer_returns_error"] = str(exc)
             st.session_state.query_result = result
     except ValueError as exc:
         logger.warning("Fund query rejected: %s", exc)
@@ -157,6 +166,7 @@ def main() -> None:
             show_performance(result)
         with right:
             show_dividends(result)
+    show_peer_returns(result)
     show_details(result)
 
 

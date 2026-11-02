@@ -19,6 +19,7 @@
 .st-key-nav_panel,
 .st-key-performance_panel,
 .st-key-dividend_panel,
+.st-key-peer_returns_panel,
 .st-key-manager_panel,
 .st-key-asset_panel,
 .st-key-notes_nav,
@@ -86,6 +87,92 @@
 .st-key-sidebar_navigation [role="radiogroup"] label:has(input:checked) {
   color: #2563EB;
   background: #EFF6FF;
+}
+
+/* 固定周期表格在窄屏横向滚动, 保留周期和指标的完整对应关系. */
+.peer-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #E2E8F0;
+  border-radius: 0.5rem;
+}
+
+.peer-returns-table {
+  width: 100%;
+  min-width: 920px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #334155;
+}
+
+.peer-returns-table th,
+.peer-returns-table td {
+  padding: 0.875rem 0.5rem;
+  border-bottom: 1px solid #EDF2F7;
+  border-right: 1px dashed #E2E8F0;
+  vertical-align: middle;
+}
+
+.peer-returns-table thead th {
+  height: 4.25rem;
+  background: #F8FAFC;
+  font-weight: 500;
+}
+
+.peer-returns-table th:first-child {
+  position: sticky;
+  left: 0;
+  width: 120px;
+  z-index: 1;
+  background: #F8FAFC;
+  font-weight: 500;
+}
+
+.peer-returns-table small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #64748B;
+  font-size: 0.6875rem;
+}
+
+.peer-returns-table tr > :last-child {
+  border-right: 0;
+}
+
+.peer-returns-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.peer-return { font-weight: 650; }
+.peer-positive { color: #DC2626; }
+.peer-negative { color: #15803D; }
+.peer-neutral, .peer-missing { color: #64748B; }
+
+.peer-quartile {
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
+  width: 68px;
+  height: 64px;
+  margin: 0 auto 0.4rem;
+  border: 1px solid #CBD5E1;
+}
+
+.peer-quartile span + span { border-top: 1px solid #E2E8F0; }
+.peer-quartile-empty { background: #FFFFFF; }
+.peer-quartile-filled { background: #DBEAFE; }
+.peer-quartile-active { background: #60A5FA; }
+.peer-quartile-label { font-size: 0.8125rem; }
+
+.peer-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 /* 绩效与分红在窄屏转为上下排列, 不影响内部指标列. */
