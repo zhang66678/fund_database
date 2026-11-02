@@ -15,7 +15,8 @@ from etl.update_funds import update_funds
 from api.tushare_client import FetchError
 
 
-def test_database_driven_update_continues_after_failure(tmp_path):
+@pytest.mark.parametrize("workers", [1, 3])
+def test_database_driven_update_continues_after_failure(tmp_path, workers):
     path = tmp_path / "update.duckdb"
     with connect(path) as db:
         initialize(db)
@@ -43,19 +44,20 @@ def test_database_driven_update_continues_after_failure(tmp_path):
                                  for d, a in [("20200110", "20200111"), ("20200115", "20200116")]], columns=fields.split(','))
 
     source = FakeSource()
-    result = update_funds(source, path, end=date(2020, 2, 10))
+    result = update_funds(source, path, end=date(2020, 2, 10), workers=workers)
     assert [r["status"] for r in result["funds"]] == ["failed", "ok", "ok"]
     assert ("000002.OF", "20200104", "20200210") in source.windows
     assert ("000003.OF", "20200101", "20200210") in source.windows
     assert result["funds"][1]["counts"]["fund_nav"]["updated"] == 1
-    again = update_funds(source, path, end=date(2020, 2, 10))
+    again = update_funds(source, path, end=date(2020, 2, 10), workers=workers)
     assert again["funds"][1]["counts"]["fund_nav"] == {"inserted": 0, "updated": 0, "unchanged": 2}
     with connect(path, read_only=True) as db:
         assert db.execute("SELECT count(*) FROM fund_nav").fetchone()[0] == 4
 
 
 @pytest.mark.parametrize("failure", ["request", "normalize", "write"])
-def test_dividend_failure_preserves_other_data(tmp_path, failure):
+@pytest.mark.parametrize("workers", [1, 3])
+def test_dividend_failure_preserves_other_data(tmp_path, failure, workers):
     """分红请求, 主键校验或写入失败, 均不影响其他表及下一只基金."""
     path = tmp_path / "dividend_failure.duckdb"
     codes = ("000001.OF", "000002.OF")
@@ -99,7 +101,7 @@ def test_dividend_failure_preserves_other_data(tmp_path, failure):
 
     source = FakeSource()
     result = update_funds(source, path, end=date(2020, 2, 10),
-                          datasets=("basic", "nav", "dividend", "manager", "asset"))
+                          datasets=("basic", "nav", "dividend", "manager", "asset"), workers=workers)
     assert result["status"] == "partial"
     assert [r["status"] for r in result["funds"]] == ["partial", "ok"]
     failed = result["funds"][0]
@@ -127,7 +129,8 @@ def test_dividend_failure_preserves_other_data(tmp_path, failure):
 
 
 @pytest.mark.parametrize("missing_count", [5, 1201])
-def test_missing_announcements_are_saved_separately(tmp_path, missing_count):
+@pytest.mark.parametrize("workers", [1, 3])
+def test_missing_announcements_are_saved_separately(tmp_path, missing_count, workers):
     """部分或全部公告日期缺失时保留原始行, 合格数据入库且不误报完整成功."""
     path = tmp_path / "money_fund.duckdb"
     with connect(path) as db:
@@ -150,7 +153,7 @@ def test_missing_announcements_are_saved_separately(tmp_path, missing_count):
             window = raw.nav_date.between(params["start_date"], params["end_date"])
             return raw.loc[window, fields.split(",")].copy()
 
-    result = update_funds(FakeSource(), path, end=date(2009, 12, 31), datasets=("nav", "asset"))
+    result = update_funds(FakeSource(), path, end=date(2009, 12, 31), datasets=("nav", "asset"), workers=workers)
     record = result["funds"][0]
     assert result["status"] == record["status"] == "partial"
     assert record["counts"]["fund_nav"]["inserted"] == 1201 - missing_count
@@ -226,3 +229,72 @@ def test_update_scope_uses_batch_or_codes_without_touching_other_funds(tmp_path,
     monkeypatch.setattr(sys, "argv", [*common, "--file", str(batch)])
     assert command.main() == 1
     assert source.codes == []
+
+
+@pytest.mark.parametrize("nav_state, expected", [("existing", ["000001.OF"]),
+                                                ("missing", ["000002.OF", "000003.OF"])])
+def test_nav_state_scope_and_parallel_single_writer(tmp_path, monkeypatch, nav_state, expected):
+    """并发网络确实重叠, 所有提交仍在主线程, 筛选基于任务开始时的净值覆盖."""
+    from threading import Barrier, get_ident
+    from etl import update_fund_data
+
+    path = tmp_path / "parallel.duckdb"
+    with connect(path) as db:
+        initialize(db)
+        for code in ("000001.OF", "000002.OF", "000003.OF"):
+            db.execute("INSERT INTO fund_basic(ts_code,name,market,found_date) VALUES (?,?,'O','2020-01-01')", [code, code])
+        db.execute("INSERT INTO fund_nav(ts_code,nav_date,ann_date,unit_nav) VALUES ('000001.OF','2020-01-10','2020-01-11',0.9)")
+    writer_thread = get_ident()
+    barrier = Barrier(len(expected))
+    calls = []
+
+    class FakeSource:
+        def query(self, endpoint, fields, **params):
+            assert get_ident() != writer_thread
+            assert endpoint == "fund_nav"
+            calls.append(params["ts_code"])
+            barrier.wait(timeout=5)
+            return pd.DataFrame([dict(ts_code=params["ts_code"], nav_date="20200110", ann_date="20200111",
+                                      unit_nav="1.2", adj_nav="1.2")], columns=fields.split(","))
+
+    original_write = update_fund_data.write_batch
+
+    def checked_write(connection, frames):
+        assert get_ident() == writer_thread
+        return original_write(connection, frames)
+
+    monkeypatch.setattr(update_fund_data, "write_batch", checked_write)
+    result = update_funds(FakeSource(), path, end=date(2020, 1, 31), datasets=("nav",),
+                          nav_state=nav_state, workers=3)
+    assert result["status"] == "completed"
+    assert sorted(calls) == expected
+    assert [r["code"] for r in result["funds"]] == expected
+    assert result["target_count"] == len(expected)
+    with connect(path, read_only=True) as db:
+        assert db.execute("SELECT count(*) FROM fund_nav").fetchone()[0] == (1 if nav_state == "existing" else 3)
+
+
+def test_cli_parallel_options_and_empty_filtered_scope(tmp_path, monkeypatch):
+    from scripts import update_database as command
+
+    path = tmp_path / "empty.duckdb"
+    with connect(path) as db:
+        initialize(db)
+        db.execute("INSERT INTO fund_basic(ts_code,name,market,found_date) VALUES ('000001.OF','test','O','2020-01-01')")
+
+    class FakeSource:
+        def query(self, *args, **kwargs):
+            pytest.fail("已有净值筛选结果为空时不能退回全库请求")
+
+    source = FakeSource()
+    monkeypatch.setattr(command, "Source", lambda: source)
+    monkeypatch.setattr(command, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["update_database", "--database", str(path), "--datasets", "nav",
+                                    "--workers", "4", "--nav-state", "existing", "--request-interval", "0.3"])
+    assert command.main() == 0
+    summary = json.loads(next((tmp_path / "logs").glob("database_update_*.json")).read_text(encoding="utf-8"))
+    assert summary["funds"] == []
+    assert summary["target_count"] == 0
+    assert summary["workers"] == 4
+    assert summary["nav_state"] == "existing"
+    assert source.interval == summary["request_interval"] == 0.3

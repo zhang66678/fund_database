@@ -11,9 +11,11 @@ def existing_fund_codes(connection) -> set[str]:
 def update_targets(connection) -> list[tuple]:
     """从完整基金表读取任务, 包括已终止基金和没有净值的新入库基金."""
     return connection.execute('''
-        SELECT b.ts_code, b.name, b.market, b.found_date, max(n.nav_date)
-        FROM fund_basic b LEFT JOIN fund_nav n ON b.ts_code = n.ts_code
-        GROUP BY b.ts_code, b.name, b.market, b.found_date ORDER BY b.ts_code
+        SELECT b.ts_code, b.name, b.market, b.found_date, n.last_nav_date
+        FROM fund_basic b LEFT JOIN (
+            SELECT ts_code, max(nav_date) AS last_nav_date FROM fund_nav GROUP BY ts_code
+        ) n ON b.ts_code = n.ts_code
+        ORDER BY b.ts_code
     ''').fetchall()
 
 
@@ -41,6 +43,8 @@ def write_batch(connection, frames: dict) -> dict:
 def upsert(connection, table: str, frame) -> dict:
     """统计新增, 变化和未变化记录, 仅写入新增或变化的数据."""
     spec = TABLES[table]
+    if frame.empty:
+        return {"inserted": 0, "updated": 0, "unchanged": 0}
     columns, keys = list(spec["columns"]), spec["key"]
     values = [name for name in columns if name not in keys]
     # SQL 标识符只取自固定 schema, 用户数据通过注册表传入.
@@ -65,11 +69,12 @@ def upsert(connection, table: str, frame) -> dict:
         selected = ", ".join(f's."{c}"' for c in columns)
         key_sql = ", ".join(f'"{k}"' for k in keys)
         assignments = ", ".join(f'"{c}" = EXCLUDED."{c}"' for c in values)
-        connection.execute(
-            f'INSERT INTO "{table}" ({names}) SELECT {selected} FROM staged s '
-            f'LEFT JOIN "{table}" t ON {join} WHERE t."{keys[0]}" IS NULL OR ({changed}) '
-            f'ON CONFLICT ({key_sql}) DO UPDATE SET {assignments}'
-        )
+        if inserted or updated:
+            connection.execute(
+                f'INSERT INTO "{table}" ({names}) SELECT {selected} FROM staged s '
+                f'LEFT JOIN "{table}" t ON {join} WHERE t."{keys[0]}" IS NULL OR ({changed}) '
+                f'ON CONFLICT ({key_sql}) DO UPDATE SET {assignments}'
+            )
         return {"inserted": inserted, "updated": updated, "unchanged": len(frame) - inserted - updated}
     finally:
         connection.unregister("incoming")

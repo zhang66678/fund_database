@@ -125,6 +125,29 @@ ts_code
 
 不传时更新全部。交易日历是共享数据，每轮只更新一次。
 
+### 大库日常更新与首次回填
+
+全量更新会逐只请求基础资料、净值、分红、经理和资产，即使已有净值也会重复请求其他条目。两万只以上基金建议将日常净值更新、首次历史回填、低频资料更新分开运行：
+
+```powershell
+# 日常：只更新已有净值的基金，沿用各自末日前回看 7 天的增量窗口
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav --nav-state existing --workers 4
+
+# 首次回填：只处理尚无净值的基金，从各自成立日下载历史
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav --nav-state missing --workers 4
+
+# 基础资料、分红、经理和资产按需要另行更新，例如每周运行
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets basic dividend manager asset calendar --workers 4
+```
+
+- `--workers`：1～16，默认 1；并发取数、清洗，数据库始终由主线程写入。最多预取约两倍线程数的任务，限制历史数据的内存占用。
+- `--nav-state`：`all`（默认，全部）、`existing`（已有至少一条净值）、`missing`（没有净值），按任务开始时的数据库记录筛选；可与 `--file`、`--codes` 组合。
+- 这两个净值分组不代表历史完整性；`existing` 仍可能存在更早的缺口，需另用 `--full-history` 复查。没有返回可入库净值的基金仍属于 `missing`，下次会重新尝试。
+- 所有线程共用一个请求限频器，包含分页与重试；默认 `--request-interval 0.15`，理论上限约 400 次/分钟。参数最小为 `0.12`，程序也会保证间隔至少 0.12 秒，遵守本账号 500 次/分钟上限。遇到限频后所有线程共同冷却 30 秒。
+- 并发用于重叠网络等待，不能突破账号限频。另开的更新进程或其他程序会共享账号配额，应避免同时运行，或增大 `--request-interval` 为其预留配额。
+- 不按工作日过滤日期，不因终止状态或空返回自动停止补查；保留原有增量回看、历史修订和异常行隔离规则。
+- 不加新参数时仍更新全部基金、全部条目；新参数和本轮筛选数量会写入更新摘要。
+
 ### 增量窗口
 
 - `nav`：从最后净值日前回看 7 个日历日，补上停更期间的数据；无净值时从成立日回填。
