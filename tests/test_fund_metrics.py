@@ -50,3 +50,47 @@ def test_missing_open_day_is_not_treated_as_one_day_return():
     result = calculate_metrics(nav, calendar)
     assert result["excluded_non_trading_rows"] == 1
     assert result["metrics"]["annual_volatility"] is None
+
+
+@pytest.mark.parametrize("null_value", [False, True])
+def test_one_percent_missing_uses_only_adjacent_returns(null_value):
+    dates = pd.bdate_range("2020-01-06", periods=100)
+    calendar = pd.DataFrame({"cal_date": pd.date_range(dates[0], dates[-1])})
+    calendar["is_open"] = calendar.cal_date.isin(dates).astype(int)
+    values = pd.Series([100.0] * 100)
+    values.iloc[51:] = 110.0
+    values.iloc[70] = 99.0
+    nav = pd.DataFrame({"nav_date": dates, "adj_nav": values})
+    if null_value:
+        nav.loc[50, "adj_nav"] = float("nan")
+    else:
+        nav = nav.drop(index=50)
+    # 非交易日披露不进入缺失比例的分母, 也不进入收益样本.
+    nav = pd.concat([nav, pd.DataFrame({"nav_date": [pd.Timestamp("2020-01-11")], "adj_nav": [999.0]})])
+    result = calculate_metrics(nav, calendar)
+    expected_returns = pd.Series([0.0] * 95 + [-0.1, 1 / 9])
+    volatility = expected_returns.std(ddof=1) * sqrt(252)
+    assert result["expected_nav_count"] == 100 and result["nav_count"] == 99
+    assert result["missing_count"] == 1 and result["missing_rate"] == 0.01
+    assert result["excluded_non_trading_rows"] == 1 and result["return_count"] == 97
+    assert result["metrics"]["annual_volatility"] == pytest.approx(volatility)
+    assert result["metrics"]["sharpe_ratio"] == pytest.approx(expected_returns.mean() * 252 / volatility)
+    assert result["metrics"]["annual_downside_risk"] == pytest.approx(sqrt(0.1 ** 2 / 97 * 252))
+    assert result["metrics"]["max_drawdown"] == pytest.approx(0.1)
+    assert result["metrics"]["annual_return"] == pytest.approx(1.1 ** (365.25 / (dates[-1] - dates[0]).days) - 1)
+
+
+def test_above_one_percent_missing_and_invalid_prices_remain_rejected():
+    dates = pd.date_range("2020-01-01", periods=100)
+    calendar = pd.DataFrame({"cal_date": dates, "is_open": 1})
+    nav = pd.DataFrame({"nav_date": dates, "adj_nav": 100.0})
+    with pytest.raises(ValueError, match="超过 1%"):
+        calculate_metrics(nav.drop(index=[40, 41]), calendar)
+    for value in (0, -1, float("inf")):
+        nav.loc[40, "adj_nav"] = value
+        with pytest.raises(ValueError, match="有效正复权净值"):
+            calculate_metrics(nav, calendar)
+    nav.loc[40, "adj_nav"] = 100
+    nav.loc[0, "adj_nav"] = float("nan")
+    with pytest.raises(ValueError, match="首末开市日"):
+        calculate_metrics(nav, calendar)

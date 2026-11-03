@@ -229,6 +229,15 @@ def show_overview(result: dict | None) -> None:
             column.metric("区间末日" + NAV_LABELS[field], "暂无数据" if pd.isna(value) else f"{value:.4f}")
 
 
+def line_markers(values: pd.Series) -> dict:
+    """仅为前后均无相邻有效值的孤立观测点显示圆点."""
+    valid = values.notna()
+    isolated = valid & ~valid.shift(1, fill_value=False) & ~valid.shift(-1, fill_value=False)
+    if not isolated.any():
+        return {"mode": "lines"}
+    return {"mode": "lines+markers", "marker": {"size": (isolated.astype(int) * 4).tolist()}}
+
+
 def show_chart(result: dict | None) -> None:
     selected = [] if result is None else result["selected"]
     has_drawdown = result is None or "drawdown" in selected
@@ -259,14 +268,14 @@ def show_chart(result: dict | None) -> None:
             if "cumulative_return" in selected:
                 figure.add_trace(go.Scatter(
                     x=series.nav_date, y=series.cumulative_return, name="累计收益率",
-                    mode="lines+markers" if series.cumulative_return.isna().any() else "lines", marker=dict(size=4),
+                    **line_markers(series.cumulative_return),
                     connectgaps=False, line=dict(color="#D97706", width=2, dash="dash"),
                     hovertemplate="%{y:.2%}<extra>%{fullData.name}</extra>",
                 ), row=1, col=1, secondary_y=True)
             if has_drawdown:
                 figure.add_trace(go.Scatter(
                     x=series.nav_date, y=series.drawdown, name="回撤",
-                    mode="lines+markers" if series.drawdown.isna().any() else "lines", marker=dict(size=4),
+                    **line_markers(series.drawdown),
                     connectgaps=False, line=dict(color="#DC5967", width=1.5),
                     fill="tozeroy", fillcolor="rgba(220, 89, 103, 0.14)",
                     hovertemplate="%{y:.2%}<extra>%{fullData.name}</extra>",
@@ -344,6 +353,8 @@ def show_performance(result: dict | None) -> None:
             st.caption("统计区间不足一年.")
         with st.expander("指标计算口径"):
             st.caption(f"实际区间: {metrics['start_date']} 至 {metrics['end_date']}, {metrics['nav_count']} 条交易日复权净值.")
+            if metrics.get("missing_count", 0):
+                st.caption(f"缺失交易日 {metrics['missing_count']}/{metrics['expected_nav_count']} ({metrics['missing_rate']:.2%}), 使用 {metrics['return_count']} 组相邻交易日收益.")
             st.caption(f"年化系数 {metrics['periods_per_year']}, 无风险利率 {metrics['risk_free_rate']:.1%}, 目标收益率 {metrics['target_return']:.1%}.")
             st.caption(f"排除 {metrics['excluded_non_trading_rows']} 条非交易日披露. 无法计算表示样本或风险分母不满足计算条件.")
 
@@ -454,7 +465,7 @@ def show_data_notes() -> None:
         st.write("基金对比使用共同开市日的复权净值计算累计收益, 从相同起点的 0% 开始. 原始净值不修改, 中间缺失保留断点, 实际比较区间以结果标注为准.")
     with st.container(border=True, key="notes_metrics"):
         st.subheader("绩效指标")
-        st.write("七项指标按交易日复权净值计算, 不随所选曲线类型变化. 指标计算口径中列出实际区间, 样本数, 年化系数, 无风险利率和目标收益率.")
+        st.write("七项指标按交易日复权净值计算, 不随所选曲线类型变化. 区间内有效复权净值的缺失比例不超过 1% 时允许计算, 风险指标仅使用相邻开市日均有净值的收益样本. 指标计算口径列出实际区间, 缺失数量, 样本数和年化参数.")
         st.write("统计区间不足一年时显示标注. 两种来源均使用本地 SSE 日历, 日历缺失或未覆盖查询日期时仅展示净值, 并提示指标计算失败.")
         st.write("涨幅与同类比较独立使用基金最新净值日, 展示阶段涨幅, 含当前季度的八个季度和含今年的八个年度. 分类采用已采集的 iFinD 投资类型一级/二级路径, 涨幅使用本地 Tushare 复权净值, 不年化, 不受图表区间影响.")
         st.write("同类平均为有效份额等权平均, 含本基金; 排名由本地数据计算, 显示名次和有效样本数, 按涨幅降序且并列取最小名次. 四分位由优到劣为优秀, 良好, 一般, 不佳, 少于四只有效样本时不提供四分位. 数据不足显示 —, 可悬停单元格查看实际区间及原因. iFinD 在线模式暂不提供同类批量比较.")

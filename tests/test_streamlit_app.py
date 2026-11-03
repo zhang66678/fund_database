@@ -296,6 +296,39 @@ def test_invalid_conditions_empty_data_and_storage_failure_keep_empty_chart(page
     assert app.error and traces(app) == []
 
 
+def test_tolerated_gap_renders_single_fund_and_comparison_metrics(page):
+    app, path = page
+    dates = pd.bdate_range("2020-01-06", periods=100)
+    rows = []
+    for code in ("000001.OF", "000002.OF"):
+        for index, day in enumerate(dates):
+            if code == "000001.OF" and index == 50:
+                continue
+            value = 1 + index * 0.001 - (0.02 if index % 10 == 0 else 0)
+            rows.append((code, day.date(), day.date(), value, value, value))
+    with connect(path) as db:
+        db.execute("DELETE FROM fund_nav")
+        db.executemany("INSERT INTO fund_nav(ts_code,nav_date,ann_date,unit_nav,accum_nav,adj_nav) VALUES (?,?,?,?,?,?)", rows)
+        db.execute("UPDATE trade_calendar SET is_open=0")
+        db.executemany("UPDATE trade_calendar SET is_open=1 WHERE cal_date=?", [(d.date(),) for d in dates])
+    select_fund(app, "000001.OF")
+    app.button(key="submit_query").click().run()
+    payload = app.session_state["query_result"]["metrics"]
+    assert payload["missing_count"] == 1 and payload["missing_rate"] == 0.01
+    assert all(value is not None for value in payload["metrics"].values())
+    assert any("缺失交易日 1/100 (1.00%)" in item.value for item in app.caption)
+    assert all(trace["mode"] == "lines" for trace in traces(app))
+    app.radio(key="workspace_page").set_value("基金对比").run()
+    select_comparison(app, ["000001.OF", "000002.OF"])
+    app.button(key="submit_comparison").click().run()
+    result = app.session_state["comparison_result"]
+    assert not app.exception and not result["errors"]
+    assert result["metrics"]["000001.OF"]["missing_count"] == 1
+    assert result["metrics"]["000002.OF"]["missing_count"] == 0
+    assert any("缺失交易日 1/100 (1.00%)" in item.value for item in app.caption)
+    assert all(trace["mode"] == "lines" for trace in traces(app))
+
+
 def test_metrics_do_not_depend_on_curve_selection(page):
     app, path = page
     with connect(path) as db:

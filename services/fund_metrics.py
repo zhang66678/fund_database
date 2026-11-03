@@ -5,6 +5,9 @@ from math import isfinite, sqrt
 import pandas as pd
 
 
+MAX_MISSING_RATE = 0.01
+
+
 def calculate_metrics(
     nav: pd.DataFrame, calendar: pd.DataFrame, *,
     periods_per_year: int = 252, risk_free_rate: float = 0.0,
@@ -34,17 +37,23 @@ def calculate_metrics(
     if not flags.isin([0, 1]).all():
         raise ValueError("交易日历开闭市标记无效")
     open_dates = flags.index[flags.eq(1)]
-    if not open_dates.isin(frame.index).all():
-        raise ValueError("区间内缺少开市日净值, 不能按连续日频计算")
     prices = pd.to_numeric(frame.reindex(open_dates).adj_nav, errors="raise")
-    if len(prices) < 2 or not prices.map(lambda x: pd.notna(x) and isfinite(x) and x > 0).all():
+    if len(prices) < 2 or not prices.dropna().map(lambda x: isfinite(x) and x > 0).all():
         raise ValueError("至少需要两个交易日的有效正复权净值")
+    missing_count = int(prices.isna().sum())
+    missing_rate = missing_count / len(prices)
+    if missing_rate > MAX_MISSING_RATE:
+        raise ValueError(f"缺少 {missing_count}/{len(prices)} 个开市日有效复权净值, 缺失比例 {missing_rate:.2%} 超过 1% 上限")
+    if prices.iloc[[0, -1]].isna().any():
+        raise ValueError("首末开市日缺少有效复权净值, 请调整区间")
 
-    returns = prices.pct_change(fill_method=None).iloc[1:]
+    # 缺口两侧的跨日涨幅不作为单日收益, 只保留相邻开市日均有效的收益样本.
+    returns = prices.pct_change(fill_method=None).dropna()
+    observed = prices.dropna()
     days = (prices.index[-1] - prices.index[0]).days
-    annual_return = float((prices.iloc[-1] / prices.iloc[0]) ** (365.25 / days) - 1)
+    annual_return = float((observed.iloc[-1] / observed.iloc[0]) ** (365.25 / days) - 1)
     volatility = float(returns.std(ddof=1) * sqrt(periods_per_year)) if len(returns) >= 2 else None
-    max_drawdown = float((1 - prices / prices.cummax()).max())
+    max_drawdown = float((1 - observed / observed.cummax()).max())
     daily_rf = (1 + risk_free_rate) ** (1 / periods_per_year) - 1
     daily_target = (1 + target_return) ** (1 / periods_per_year) - 1
     # 分母按全部收益观测计数, 不是仅计算下跌日的标准差.
@@ -68,9 +77,10 @@ def calculate_metrics(
         "metrics": metrics,
         "start_date": prices.index[0].date().isoformat(),
         "end_date": prices.index[-1].date().isoformat(),
-        "nav_count": len(prices), "return_count": len(returns),
+        "nav_count": len(observed), "return_count": len(returns),
+        "expected_nav_count": len(prices), "missing_count": missing_count, "missing_rate": missing_rate,
         "short_period": bool(prices.index[-1] < prices.index[0] + pd.DateOffset(years=1)),
-        "excluded_non_trading_rows": len(frame) - len(prices),
+        "excluded_non_trading_rows": int((~frame.index.isin(open_dates)).sum()),
         "periods_per_year": periods_per_year,
         "risk_free_rate": risk_free_rate, "target_return": target_return,
     }

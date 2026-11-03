@@ -9,7 +9,7 @@ import streamlit as st
 
 from app.bootstrap import create_service
 from app.fund_search import fund_candidates
-from app.components import METRICS, choice_code, fund_option_labels, remember_query, show_date_filters, show_query_source, style_chart
+from app.components import METRICS, choice_code, fund_option_labels, line_markers, remember_query, show_date_filters, show_query_source, style_chart
 
 
 logger = logging.getLogger(__name__)
@@ -83,12 +83,12 @@ def _show_chart(result: dict | None) -> None:
         for index, (code, name) in enumerate(result["funds"].items()):
             figure.add_trace(go.Scatter(
                 x=curve.nav_date, y=curve[code], name=f"{code} {name}", connectgaps=False,
-                mode="lines+markers" if curve[code].isna().any() else "lines", marker=dict(size=4),
+                **line_markers(curve[code]),
                 line=dict(color=COLORS[index % len(COLORS)], width=2),
                 hovertemplate="%{y:.2%}<extra>%{fullData.name}</extra>",
             ))
         if curve.iloc[:, 1:].isna().any().any():
-            st.caption("部分基金存在缺失记录, 已保留断点; 稀疏序列显示实际观测点.")
+            st.caption("部分基金存在缺失记录, 已保留断点; 孤立观测点以圆点显示.")
     style_chart(figure, yaxis_title="累计收益率")
     figure.update_yaxes(tickformat=".0%", zeroline=True, zerolinecolor="#CBD5E1")
     st.plotly_chart(figure, width="stretch", theme=None, key="comparison_chart")
@@ -141,6 +141,8 @@ def _show_performance(result: dict | None) -> None:
                     continue
                 st.markdown(f"**{result['funds'][code]} · {code}**")
                 st.caption(f"实际区间: {payload['start_date']} 至 {payload['end_date']}, {payload['nav_count']} 条交易日复权净值, 排除 {payload['excluded_non_trading_rows']} 条非交易日披露.")
+                if payload.get("missing_count", 0):
+                    st.caption(f"缺失交易日 {payload['missing_count']}/{payload['expected_nav_count']} ({payload['missing_rate']:.2%}), 使用 {payload['return_count']} 组相邻交易日收益.")
                 st.caption(f"年化系数 {payload['periods_per_year']}, 无风险利率 {payload['risk_free_rate']:.1%}, 目标收益率 {payload['target_return']:.1%}.")
 
 
