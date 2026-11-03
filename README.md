@@ -2,7 +2,7 @@
 
 本地单机的公募基金研究项目：从 Tushare Pro 采集场外基金数据存入 DuckDB，也支持切换到 iFinD HTTP 接口在线查询，通过 Streamlit + Plotly 展示净值、收益与风险指标。
 
-项目面向个人研究与本地演示，不提供实时行情，不自动发现新基金，也不包含多人部署或任务调度。
+项目面向个人研究与本地演示，支持通过命令同步基金名单与基础资料，不提供实时行情，也不包含多人部署或任务调度。
 
 ## 快速开始
 
@@ -24,6 +24,8 @@ python -m venv .venv
 ```
 
 更新数据库前请停止 Streamlit，避免 DuckDB 文件写锁冲突。需要批量扩充基金时，先运行 `scripts.update_fund_list` 更新总名单快照，再用 `scripts.add_fund --from-list` 生成批次。更多命令和失败处理见 [数据流程](docs/etl.md)。
+
+全库日常维护可运行 `.\.venv\Scripts\python.exe -m scripts.sync_fund_list`, 一次获取名单, 添加新基金并同步已有基金的资料和状态; 今天已下载名单时加 `--from-list` 复用本地快照. 同步后继续使用 `scripts.update_database` 更新净值等数据.
 
 ## 文档索引
 
@@ -85,7 +87,7 @@ flowchart LR
 
 - 运行环境：Windows、Python 3.14、项目内 `.venv`。
 - 数据源：Tushare 本地数据库 / iFinD HTTP 接口，侧栏切换。iFinD 配置及首版范围见 [数据源](docs/data-sources.md#ifind)。
-- 名单：`scripts.update_fund_list` 定期生成场外基金快照，供批量添加和研究使用。
+- 名单：`scripts.sync_fund_list` 获取快照并同步新增基金与基础资料; `scripts.update_fund_list` 保留仅下载快照的用法。
 - 存储：DuckDB 单文件，默认 `data/fund_database.duckdb`。
 - 页面：基金分析、基金对比、数据说明。
 - CSV 查询保留为对照模式，通过 `NAV_CSV` 环境变量启用。

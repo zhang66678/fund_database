@@ -1,85 +1,138 @@
-# 数据流程
+# 数据更新指南
 
-本文说明基金如何进入数据库、如何增量更新，以及失败时会发生什么。表结构和写入细节见 [数据库说明](../database/README.md)，接口字段见 [数据源](data-sources.md)。
+在项目根目录的 PowerShell 中运行以下命令. **写入数据库前先停止 Streamlit, 同一时间只运行一个更新任务.** 默认数据库为 `data/fund_database.duckdb`.
 
-## 命令总览
+Tushare 和 iFinD 的配置见 [数据源](data-sources.md), 表结构与写入规则见 [数据库说明](../database/README.md).
 
-| 命令 | 作用 | 是否请求 Tushare |
-| --- | --- | --- |
-| `python -m scripts.init_database` | 创建数据库和缺失的表 | 否 |
-| `python -m scripts.init_database --snapshot <目录>` | 从单基金快照建库并导入 | 否 |
-| `python -m scripts.update_fund_list` | 更新场外基金总名单快照 | 是 |
-| `python -m scripts.update_fund_categories` | 通过 iFinD 获取投资类型分类并独立入库 | 否, 请求 iFinD |
-| `python -m scripts.add_fund <代码>` | 添加一只场外基金的基础资料 | 是 |
-| `python -m scripts.add_fund --file <csv>` | 批量添加基础资料 | 是（仅新代码） |
-| `python -m scripts.add_fund --from-list` | 从本地总名单生成批次 CSV | 否 |
-| `python -m scripts.update_database` | 更新全库数据 | 是 |
+## 日常同步入库
 
-添加和更新数据库前应停止 Streamlit，避免 DuckDB 写锁冲突。
-
-## 更新基金名单
-
-名单是批量添加的输入，需定期更新：
+日常维护按顺序执行两步: **同步名单, 再更新净值与交易日历.**
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.update_fund_list
+# 1. 获取最新名单, 添加新基金, 更新已有基金的基础资料和状态
+.\.venv\Scripts\python.exe -m scripts.sync_fund_list
+
+# 2. 更新全库净值和 SSE 日历, 使用 8 并发
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav calendar --workers 8
 ```
 
-- 请求 `fund_basic` 的 `L`、`D`、`I` 三种状态，固定 `market=O`。
-- 每页 1000 行，先用小页探测确认 `offset` 生效。
-- 输出到 `data/fund_list/时间戳/`：三个状态 CSV、`fund_basic_all.csv`、`list_summary.json`。
-- 只有三种状态全部获取并校验完成后才写摘要；有摘要表示快照完整。
-- `--run-dir` 可指定输出目录，便于复现或重跑。
-- 不读取数据库，不写数据库；日志在 `logs/fund_list.log`。
-- `scripts.add_fund --from-list` 和研究脚本默认使用最新完整快照。
+已有净值的基金按增量窗口更新, 尚无净值的基金从成立日回填. 首次回填通常比日常增量更新耗时更长.
 
-## 更新基金细分类
+**今天已下载过名单**, 第一步可替换为:
 
 ```powershell
-# 先停止 Streamlit, 再使用已配置的 iFinD 客户端读取分类并写入分类表
+.\.venv\Scripts\python.exe -m scripts.sync_fund_list --from-list
+```
+
+`--from-list` 默认取最新完整快照, 也可在后面指定目录, 如 `data/fund_list/20261103_091133`.
+
+名单同步直接复用名单中的基础字段, 无需逐只请求接口:
+
+| 名单变化 | 数据库处理 |
+| --- | --- |
+| 新增基金 | 写入基础资料, 纳入后续数据更新 |
+| 已有资料或状态变化, 如 L 转 D | 更新基础资料, 保留历史数据 |
+| 基金从名单中消失 | 保留原记录, 在摘要的 `missing_from_snapshot` 中列出 |
+| 非六位代码, 名称缺失, 成立日期无效 | 跳过该记录, 在 `skipped_records` 中列出原因; 已有资料保持原样 |
+
+同步覆盖 L(存续), D(终止), I(发行) 三种状态, 入库代码格式为六位数字加 `.OF`. 名单同步只写基础资料; 净值等数据和 iFinD 分类分别由对应命令更新.
+
+## 按需更新其他数据
+
+### 分红, 经理和资产
+
+这些资料可按需要更新, 例如每周运行一次:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets dividend manager asset --workers 8
+```
+
+已同步名单时, 基础资料已刷新. 单独刷新基础资料可使用 `--datasets basic`.
+
+### iFinD 基金细分类
+
+分类用于页面的同类涨幅比较, 独立存入 `fund_category`:
+
+```powershell
+# 更新全部已入库基金的分类
 .\.venv\Scripts\python.exe -m scripts.update_fund_categories
 
-# 先验证少量基金, 只保存分类快照, 不修改数据库
-.\.venv\Scripts\python.exe -m scripts.update_fund_categories --codes 000001 000003 --snapshot-only
-
-# 只更新指定的已入库基金
+# 只更新指定基金, 适合补充新基金分类
 .\.venv\Scripts\python.exe -m scripts.update_fund_categories --codes 000001 000003
 ```
 
-- 分类来自既有 iFinD `basic_data_service`, 复用 `IfindClient` 的鉴权和缓存, 凭证配置见 [iFinD 数据源](data-sources.md#ifind).
-- 读取投资类型一级, 二级和三级原文; 分组固定采用 `一级 / 二级`, 不使用运作形式, 不回退三级或第三方分类.
-- 默认查询全部本地基金, 每次请求 20 只; `--codes` 指定范围, `--batch-size` 可调整为 1 至 100, 实际配额和权限由账号决定. 首次建议先运行少量基金的快照模式.
-- 默认保存 `data/fund_categories/时间戳/fund_categories.csv` 和 `summary.json`; `--run-dir` 可指定未存在的目录.
-- 分类独立写入 `fund_category`, 不覆盖 Tushare 的 `fund_type`, `invest_type` 或净值数据.
-- 按来源, 基金代码和获取日期保留快照, 同日重跑更新所选基金的同日记录; 其他基金不受影响. 同类查询使用每只基金最近采集的分类, 各基金获取日期可能不同.
-- 一级或二级缺失, 或接口未返回该代码时, 保留原始层级及空分组记录; 不沿用旧分类, 不补齐为 Tushare 大类. 摘要分别统计已分类和缺失数量.
-- 全部批次获取并校验成功后才写库, 获取失败不提交部分分类, 写入失败整批回滚; 网络请求期间不持有数据库写连接.
-- 分类为获取时的当前分类, 不宣称还原历史时点的分类. 模拟响应验证不能代替账号权限及真实返回值验证.
+默认每次请求 20 只基金; `--batch-size` 可设为 1 至 100. 添加 `--snapshot-only` 时仅保存分类快照. `--run-dir` 可指定尚未存在的输出目录.
 
-## 初始化
+分组采用 iFinD 的 `一级 / 二级` 投资类型, 同时保留原始三级分类. 每只基金使用最近采集的分类; 同日重跑更新同日记录. 一级或二级缺失时记录为空分组, 不沿用旧分类.
+
+## 指定范围与参数
+
+### 更新哪些基金
+
+`update_database` 默认处理全部已入库基金. `--codes` 和 `--file` 二选一, 可搭配 `--datasets` 等参数:
+
+```powershell
+# 指定基金, 六位代码会自动补 .OF
+.\.venv\Scripts\python.exe -m scripts.update_database --codes 000001 040001.OF --datasets nav --workers 8
+
+# 指定批次, CSV 只需包含 ts_code 列
+.\.venv\Scripts\python.exe -m scripts.update_database --file data/fund_batches/batch_001.csv --datasets nav --workers 8
+```
+
+指定代码必须已入库. 净值筛选还可使用 `--nav-state existing`(已有净值) 或 `--nav-state missing`(尚无净值), 默认 `all`. 终止基金仍在更新范围内.
+
+### 更新哪些数据
+
+| `--datasets` 值 | 内容 | 获取范围 |
+| --- | --- | --- |
+| `basic` | 基础资料 | 每次获取最新资料 |
+| `nav` | 单位净值, 累计净值, 复权净值, 累计分红 | 按最后净值日增量更新 |
+| `dividend` | 分红披露 | 每次获取全部记录 |
+| `manager` | 经理任职历史 | 每次获取全部记录 |
+| `asset` | 资产净值与合计资产净值 | 按资产表自己的末日增量更新 |
+| `calendar` | SSE 交易日历 | 按日历末日增量更新, 每轮只处理一次 |
+
+**省略 `--datasets` 会更新全部六项.** 对全库日常更新, 使用前面的净值与日历命令即可.
+
+### 并发和日期
+
+以下参数用于 `update_database`:
+
+| 参数 | 默认值 | 用途 |
+| --- | --- | --- |
+| `--workers` | `1` | 取数并发数, 可选 1 至 16; 示例使用 8 |
+| `--request-interval` | `0.15` | 所有线程共享的请求间隔(秒), 最小 `0.12` |
+| `--refresh-days` | `7` | 增量窗口包含末日及之前 6 个日历日, 并更新至本轮结束日期 |
+| `--end-date` | 今天 | 限制净值, 资产和日历的结束日期, 格式 `YYYY-MM-DD` |
+| `--full-history` | 关闭 | 复查所选净值, 资产和日历的全部历史 |
+| `--database` | `data/fund_database.duckdb` | 指定数据库; 其他入库命令也支持此参数 |
+
+默认请求节奏合计约 400 次/分钟, 项目按账号 500 次/分钟设置上限. 并发用于重叠网络等待, 数据库由主线程统一写入; 发生限频时所有线程共同冷却 30 秒.
+
+增量窗口外的历史缺口或修订, 使用 `--full-history` 复查. 例如:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_database --codes 000001 --datasets nav --full-history
+```
+
+## 首次建库与手动添加
+
+**首次使用**先初始化, 然后按前面的日常流程同步名单和数据:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.init_database
 ```
 
-- 仅创建缺失的表，重复运行不会清空已有数据。
-- 不需要 Token。
-- 字段变更需要单独迁移；初始化不会修改旧表结构。
+初始化只创建缺失的表, 重跑保留已有数据; 旧表字段变更需要单独迁移.
 
-## 添加基金
-
-### 单只
+**只维护少量基金**时, 可以手动添加, 再更新该基金的数据:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.add_fund 000001
-.\.venv\Scripts\python.exe -m scripts.add_fund 040001.OF
+.\.venv\Scripts\python.exe -m scripts.update_database --codes 000001
 ```
 
-六位代码会自动补 `.OF`。程序获取并校验场外基金资料，写入 `fund_basic`；重复添加只更新变化字段。此步骤不下载净值，需再运行 `update_database`。
-
-### 固定批次
-
-批次 CSV 只需 `ts_code` 列：
+**批量添加**时, CSV 格式如下:
 
 ```csv
 ts_code
@@ -89,156 +142,63 @@ ts_code
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.add_fund --file data/fund_batches/batch_001.csv
+.\.venv\Scripts\python.exe -m scripts.update_database --file data/fund_batches/batch_001.csv
 ```
 
-- 批次内按代码去重；完整 `fund_basic` 中已有的代码跳过，不请求接口。
-- 每只基金单独提交事务；一只失败不影响其他基金。
-- 重跑同一文件时，已成功的跳过，失败的重新尝试。
-- 不要直接传入全市场名单；先用 `--from-list` 生成小批次。
-- 摘要写入 `logs/add_funds_时间戳.json`，包含新增、已存在、重复、失败及逐条原因。
+批量添加会跳过已有代码, 每只新基金单独提交; 失败后可重跑同一文件. 刷新已有资料使用名单同步或 `update_database --datasets basic`.
 
-### 从总名单生成批次
+也可从本地名单生成候选批次:
 
 ```powershell
-# 默认选择存续场外基金，最多 20 只
-.\.venv\Scripts\python.exe -m scripts.add_fund --from-list
-
-# 指定类型和数量
 .\.venv\Scripts\python.exe -m scripts.add_fund --from-list --fund-types 股票型 混合型 债券型 --limit 30
 ```
 
-规则：
+此命令仅生成 CSV, 路径在终端输出. 默认选取存续基金, 排除已入库代码, 按成立日期和代码排序; 不指定数量时最多 20 只. `--status` 可选 L/D/I, `--output` 可指定输出文件, 已有文件不覆盖. 生成后用同一 CSV 添加和更新数据.
 
-- 先运行 `scripts.update_fund_list` 生成最新完整快照。
-- 不传路径时，取 `data/fund_list/` 下目录名最新的完整快照。
-- 候选为场外 `market=O`，状态默认 `L`，可指定 `L`、`D`、`I`。
-- 先排除已入库基金，再按成立日期和代码排序取前 `limit` 只。
-- 输出到 `data/fund_batches/batch_时间戳.csv`；已有文件不覆盖。
-- 只生成清单，不请求接口、不写数据库。
+## 中断与异常处理
 
-确认 CSV 后，用 `--file` 指向同一文件添加，再用同一文件更新数据。
-
-## 更新数据库
-
-```powershell
-# 全库
-.\.venv\Scripts\python.exe -m scripts.update_database
-
-# 只更新指定基金
-.\.venv\Scripts\python.exe -m scripts.update_database --codes 000001 040001.OF
-
-# 只更新指定批次
-.\.venv\Scripts\python.exe -m scripts.update_database --file data/fund_batches/batch_001.csv
-
-# 只更新部分数据
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav asset
-```
-
-`--file` 与 `--codes` 二选一。指定的基金必须已经在库中，否则报错，不会自动添加。
-
-### 更新条目
-
-| `--datasets` | 内容 |
+| 情况 | 如何处理 |
 | --- | --- |
-| `basic` | 基金基础资料 |
-| `nav` | 单位净值、累计净值、复权净值、累计分红 |
-| `dividend` | 分红披露 |
-| `manager` | 基金经理任职历史 |
-| `asset` | 资产净值与合计资产净值 |
-| `calendar` | SSE 交易日历 |
+| 断网, 超时或 `FetchError` | 查看重试日志; 默认最多尝试 3 次, 权限或凭证错误直接失败 |
+| 某只基金最终失败 | 任务继续处理其他基金; 结束摘要标记 `partial`, 命令返回非零退出码 |
+| 关机或手动中断 | 已提交数据保留; 等旧进程退出后可重跑原命令, 按主键新增或更新 |
+| 需要跳过已处理基金续跑 | 根据日志整理剩余代码 CSV, 再用 `--file` 更新; 当前没有自动断点续跑参数 |
+| 净值或资产缺少公告日期 | 异常行写入数据库同目录的 `rejected_rows/运行时间/`, 合格行继续入库, 本轮标记 `partial` |
+| 修复更早的异常记录 | 来源补全后, 对对应基金加 `--full-history` 复查 |
 
-不传时更新全部。交易日历是共享数据，每轮只更新一次。
+日常更新中, 同一基金的基础资料与净值共同提交, 分红, 经理和资产各自提交. 名单同步和分类更新分别在整批获取及校验成功后提交, 写入失败整批回滚.
 
-### 大库日常更新与首次回填
+净值筛选 `existing` 只表示至少已有一条净值, 更早的缺口仍需全历史复查. 接口空返回时保留已有记录; 尚无净值的基金继续属于 `missing`.
 
-全量更新会逐只请求基础资料、净值、分红、经理和资产，即使已有净值也会重复请求其他条目。两万只以上基金建议将日常净值更新、首次历史回填、低频资料更新分开运行：
+## 日志与输出
 
-```powershell
-# 日常：只更新已有净值的基金，沿用各自末日前回看 7 天的增量窗口
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav --nav-state existing --workers 4
+更新结束后查看 JSON 摘要中的状态, 写入数量和失败原因. **强制中断可能没有结束摘要**, 此时以过程日志和数据库记录核对进度.
 
-# 首次回填：只处理尚无净值的基金，从各自成立日下载历史
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav --nav-state missing --workers 4
+| 任务 | 过程日志 | 摘要或快照 |
+| --- | --- | --- |
+| 名单同步 | `logs/fund_list_sync.log` | `logs/fund_list_sync_时间戳.json` |
+| 数据更新 | `logs/database_update.log` | `logs/database_update_时间戳.json` |
+| 手动添加 | `logs/add_fund.log` | 批量添加: `logs/add_funds_时间戳.json` |
+| 生成批次 | `logs/add_fund.log` | `data/fund_batches/batch_时间戳.csv`, `logs/fund_batch_时间戳.json` |
+| 名单快照 | 仅下载时为 `logs/fund_list.log` | `data/fund_list/时间戳/` |
+| iFinD 分类 | 终端输出 | `data/fund_categories/时间戳/` 中的 `fund_categories.csv` 和 `summary.json` |
 
-# 基础资料、分红、经理和资产按需要另行更新，例如每周运行
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets basic dividend manager asset calendar --workers 4
-```
+名单快照包含 `fund_basic_all.csv`, L/D/I 三份 CSV 和 `list_summary.json`. 三种状态全部获取并校验完成后才生成摘要; 自动选择名单时取目录名最新的完整快照.
 
-- `--workers`：1～16，默认 1；并发取数、清洗，数据库始终由主线程写入。最多预取约两倍线程数的任务，限制历史数据的内存占用。
-- `--nav-state`：`all`（默认，全部）、`existing`（已有至少一条净值）、`missing`（没有净值），按任务开始时的数据库记录筛选；可与 `--file`、`--codes` 组合。
-- 这两个净值分组不代表历史完整性；`existing` 仍可能存在更早的缺口，需另用 `--full-history` 复查。没有返回可入库净值的基金仍属于 `missing`，下次会重新尝试。
-- 所有线程共用一个请求限频器，包含分页与重试；默认 `--request-interval 0.15`，理论上限约 400 次/分钟。参数最小为 `0.12`，程序也会保证间隔至少 0.12 秒，遵守本账号 500 次/分钟上限。遇到限频后所有线程共同冷却 30 秒。
-- 并发用于重叠网络等待，不能突破账号限频。另开的更新进程或其他程序会共享账号配额，应避免同时运行，或增大 `--request-interval` 为其预留配额。
-- 不按工作日过滤日期，不因终止状态或空返回自动停止补查；保留原有增量回看、历史修订和异常行隔离规则。
-- 不加新参数时仍更新全部基金、全部条目；新参数和本轮筛选数量会写入更新摘要。
+## 其他操作
 
-### 增量窗口
-
-- `nav`：从最后净值日前回看 7 个日历日，补上停更期间的数据；无净值时从成立日回填。
-- `asset`：使用资产表自己的最后日期回看，不能用净值末日代替。
-- `calendar`：从日历末日回看。
-- `basic`、`dividend`、`manager`：每次重新获取。
+**只下载名单, 暂不入库:**
 
 ```powershell
-# 扩大回看窗口
-.\.venv\Scripts\python.exe -m scripts.update_database --refresh-days 30
-
-# 全历史复查净值和资产
-.\.venv\Scripts\python.exe -m scripts.update_database --full-history
-
-# 只复查资产
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets asset --full-history
+.\.venv\Scripts\python.exe -m scripts.update_fund_list
 ```
 
-增量窗口用于日常更新；窗口外的历史修订需要 `--full-history` 或扩大回看天数。
+`--run-dir` 可指定输出目录. 后续运行 `sync_fund_list --from-list <该目录>` 即可同步该快照.
 
-### 事务与失败
-
-- `basic` + `nav` 同一次提交，失败则一起回滚。
-- `dividend`、`manager`、`asset` 各自提交，单项失败不影响其他数据。
-- 单只基金失败后继续处理下一只。
-- 存在失败时整体状态为 `partial`，命令返回非零退出码，下次运行会重新尝试。
-
-### 异常行隔离
-
-净值和资产缺少公告日期时：
-
-- 将这些原始行写入数据库同目录的 `rejected_rows/运行时间/`，文件名为 `<表名>_<代码>.csv`。
-- 合格行继续校验和入库。
-- 该基金和本轮任务标记 `partial`。
-- 不补造公告日期，也不替换主键。
-
-数据源补全后，用 `--full-history` 复查对应历史。
-
-### 日志与摘要
-
-| 文件 | 内容 |
-| --- | --- |
-| `logs/database_update.log` | 本轮更新过程 |
-| `logs/database_update_时间戳.json` | 每只基金、每张表的新增 / 更新 / 未变化数量及失败原因 |
-| `logs/fund_list.log` | 名单快照获取过程 |
-| `logs/add_fund.log` | 添加过程 |
-| `logs/add_funds_时间戳.json` | 批量添加摘要 |
-| `logs/fund_batch_时间戳.json` | 批次筛选条件与输出路径 |
-
-## 快照导入
-
-已有单基金核查快照时，可以跳过 Tushare 直接建库：
+**从已有单基金快照导入:**
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.init_database --snapshot data/single_fund_audit/20261012_093903
 ```
 
-快照需要包含 `fund_basic.csv`、`fund_nav.csv`、`fund_div.csv`、`trade_cal.csv`。导入会：
-
-- 统一字段类型，空字符串转为 NULL。
-- 去除完全重复行。
-- 主键缺失或冲突时拒绝导入。
-- 四张表在同一事务中提交，失败全部回滚。
-
-## 注意事项
-
-- 更新时网站必须停止；DuckDB 单文件不能同时被页面读取和命令写入。
-- `--end-date` 限制净值、资产和日历；分红和经理获取接口返回的全部记录。
-- 空结果只表示接口没有返回数据，不能证明该基金没有遗漏。
-- 详细字段和权限见 [数据源](data-sources.md)。
+目录须包含 `fund_basic.csv`, `fund_nav.csv`, `fund_div.csv`, `trade_cal.csv`. 导入时统一类型, 去除完全重复行, 主键缺失或冲突则拒绝导入; 四张表在同一事务中提交.

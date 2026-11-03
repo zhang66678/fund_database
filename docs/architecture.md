@@ -81,6 +81,8 @@ Tushare Pro
 
 命令入口为 `scripts/update_fund_list.py`。
 
+`etl/sync_fund_list.py` 校验完整快照, 复用基础字段批量新增及更新 `fund_basic`, 保留名单外基金和历史数据. `scripts/sync_fund_list.py` 默认先获取最新快照再同步, `--from-list` 可复用本地完整名单, 不逐只调用接口.
+
 `api/ifind_client.py` 负责 HTTP 鉴权、请求、错误提示和 10 分钟内存缓存。`app/bootstrap.py` 根据会话中的数据源选择组装服务, DuckDB 服务及 iFinD 客户端在当前浏览器会话复用, 页面和服务不直接请求接口.
 
 ## 目录职责
@@ -88,11 +90,11 @@ Tushare Pro
 | 目录 | 主要文件 |
 | --- | --- |
 | `api/` | `tushare_client.py`、`fund_fields.py`、`ifind_client.py` |
-| `etl/` | `extract.py`、`fund_list.py`、`import_snapshot.py`、`add_funds.py`、`update_funds.py` |
+| `etl/` | `extract.py`、`fund_list.py`、`sync_fund_list.py`、`import_snapshot.py`、`add_funds.py`、`update_funds.py` |
 | `database/` | `connection.py`、`schema.py`、`writer.py`、`repository.py`、`duckdb_repository.py`、`csv_repository.py`、`ifind_repository.py` |
 | `services/` | `fund_service.py`、`fund_metrics.py` |
 | `app/` | `streamlit_app.py`、`comparison_page.py`、`components.py`、`bootstrap.py`、`styles.css` |
-| `scripts/` | `init_database.py`、`update_fund_list.py`、`add_fund.py`、`update_database.py` |
+| `scripts/` | `init_database.py`、`update_fund_list.py`、`sync_fund_list.py`、`add_fund.py`、`update_database.py` |
 
 ## 扩展位置
 
