@@ -33,8 +33,8 @@ def main() -> int:
     args = parser.parse_args()
     if not MIN_REQUEST_INTERVAL <= args.request_interval < float("inf"):
         parser.error("--request-interval 必须为至少 0.12 的有限数值, 以遵守 500 次/分钟上限")
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = ROOT / "logs/database"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
         logging.StreamHandler(), logging.FileHandler(log_dir / "database_update.log", encoding="utf-8")])
     try:

@@ -97,7 +97,7 @@ def test_command_reuses_local_snapshot_or_fetches_once(database, tmp_path, monke
     monkeypatch.setattr(command, "Source", unexpected_client)
     monkeypatch.setattr(sys, "argv", ["sync_fund_list", "--from-list", "--database", str(database)])
     assert command.main() == 0
-    reports = list((tmp_path / "logs").glob("fund_list_sync_*.json"))
+    reports = list((tmp_path / "logs/fund_list").glob("fund_list_sync_*.json"))
     assert json.loads(reports[0].read_text(encoding="utf-8"))["updated"] == 1
 
     sentinel = object()
@@ -121,7 +121,7 @@ def test_command_reuses_local_snapshot_or_fetches_once(database, tmp_path, monke
     monkeypatch.setattr(command, "datetime", SimpleNamespace(now=lambda: datetime(2026, 11, 3, 9, 13)))
     monkeypatch.setattr(command, "fetch_fund_list", failed_fetch)
     assert command.main() == 1 and calls[-1] == "failed"
-    assert len(list((tmp_path / "logs").glob("fund_list_sync_*.json"))) == 2
+    assert len(list((tmp_path / "logs/fund_list").glob("fund_list_sync_*.json"))) == 2
     with connect(database, read_only=True) as db:
         assert db.execute("SELECT count(*) FROM fund_basic").fetchone()[0] == 2
         assert db.execute("SELECT status FROM fund_basic WHERE ts_code='000001.OF'").fetchone()[0] == "D"

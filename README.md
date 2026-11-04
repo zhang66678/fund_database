@@ -73,7 +73,7 @@ flowchart LR
 | `research/` | 一次性数据探索与历史核查，不被正式流程依赖 |
 | `ifind_test/` | iFinD 取数验证脚本 |
 | `data/` | 本地数据库、快照、批次和工具，不提交 Git |
-| `logs/` | 运行日志和 JSON 摘要，不提交 Git |
+| `logs/` | 按 database / fund_list / fund_add / research / demo / previews 分类的日志及摘要, 不提交 Git |
 
 ## 数据原则
 

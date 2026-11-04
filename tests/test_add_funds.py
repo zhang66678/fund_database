@@ -66,7 +66,7 @@ def test_batch_skips_existing_continues_after_failure_and_retries(tmp_path, monk
     monkeypatch.setattr(command, "ROOT", tmp_path)
     monkeypatch.setattr(sys, "argv", ["add_fund", "--file", str(batch), "--database", str(path)])
     assert command.main() == 1  # 非法代码仍在原文件中, 命令需返回非零状态.
-    summary = json.loads(next((tmp_path / "logs").glob("add_funds_*.json")).read_text(encoding="utf-8"))
+    summary = json.loads(next((tmp_path / "logs/fund_add").glob("add_funds_*.json")).read_text(encoding="utf-8"))
     assert summary["added"] == 0 and summary["failed"] == 1
     batch.write_text("ts_code\n000001\n000002.of\n000002\n000004.OF\n", encoding="utf-8-sig")
     assert command.main() == 0
@@ -125,7 +125,7 @@ def test_prepare_batch_filters_latest_snapshot_and_preserves_database(tmp_path, 
                                       "--limit", "1", "--output", str(retired), "--database", str(path)])
     assert command.main() == 0
     assert pd.read_csv(retired).ts_code.tolist() == ["000005.OF"]
-    report = json.loads(next((tmp_path / "logs").glob("fund_batch_*.json")).read_text(encoding="utf-8"))
+    report = json.loads(next((tmp_path / "logs/fund_add").glob("fund_batch_*.json")).read_text(encoding="utf-8"))
     assert report["source_file"] == str(latest) and report["selected"] == 1
     with connect(path, read_only=True) as db:
         assert db.execute("SELECT count(*) FROM fund_basic").fetchone()[0] == 1

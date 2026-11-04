@@ -128,10 +128,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', type=Path, help='指定清单快照目录, 默认自动选择最新完整快照')
     args = parser.parse_args()
-    (ROOT / 'logs').mkdir(exist_ok=True)
+    log_dir = ROOT / 'logs/research'
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(
-                            ROOT / 'logs' / 'fund_selection.log', encoding='utf-8')])
+                            log_dir / 'fund_selection.log', encoding='utf-8')])
     LOGGER.info('开始筛选最长存续基金')
     try:
         folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'fund_list')

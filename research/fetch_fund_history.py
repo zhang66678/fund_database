@@ -105,10 +105,11 @@ def main() -> int:
     parser.add_argument('--run-dir', type=Path, help='基金清单快照目录')
     parser.add_argument('--end-date', type=date.fromisoformat, default=date.today(), help='截止日期 YYYY-MM-DD')
     args = parser.parse_args()
-    (ROOT / 'logs').mkdir(exist_ok=True)
+    log_dir = ROOT / 'logs/research'
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(
-                            ROOT / 'logs' / 'fund_history.log', encoding='utf-8')])
+                            log_dir / 'fund_history.log', encoding='utf-8')])
     try:
         folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'fund_list')
         selected = folder / 'longest_lived' / 'top_10.csv'

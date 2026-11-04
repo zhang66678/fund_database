@@ -14,9 +14,10 @@ def main() -> None:
     parser.add_argument("--snapshot", type=Path, help="可选的单基金快照目录, 不指定时仅建库")
     parser.add_argument("--database", type=Path, default=DATABASE_PATH)
     args = parser.parse_args()
-    (ROOT / "logs").mkdir(exist_ok=True)
+    log_dir = ROOT / "logs/database"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(ROOT / "logs/database_import.log", encoding="utf-8")])
+        logging.StreamHandler(), logging.FileHandler(log_dir / "database_import.log", encoding="utf-8")])
     try:
         if args.snapshot is not None:
             import_snapshot(args.snapshot, args.database)

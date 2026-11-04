@@ -207,7 +207,7 @@ def test_update_scope_uses_batch_or_codes_without_touching_other_funds(tmp_path,
     assert command.main() == 0
     assert source.codes == ["000002.OF", "000003.OF"]
     assert "更新进度 1/2" in caplog.text and "更新进度 2/2" in caplog.text
-    summary_path = next((tmp_path / "logs").glob("database_update_*.json"))
+    summary_path = next((tmp_path / "logs/database").glob("database_update_*.json"))
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["requested_codes"] == ["000002.OF", "000003.OF"]
     assert summary["source_file"] == str(batch)
@@ -292,7 +292,7 @@ def test_cli_parallel_options_and_empty_filtered_scope(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["update_database", "--database", str(path), "--datasets", "nav",
                                     "--workers", "4", "--nav-state", "existing", "--request-interval", "0.3"])
     assert command.main() == 0
-    summary = json.loads(next((tmp_path / "logs").glob("database_update_*.json")).read_text(encoding="utf-8"))
+    summary = json.loads(next((tmp_path / "logs/database").glob("database_update_*.json")).read_text(encoding="utf-8"))
     assert summary["funds"] == []
     assert summary["target_count"] == 0
     assert summary["workers"] == 4

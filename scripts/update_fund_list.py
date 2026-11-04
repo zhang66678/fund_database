@@ -14,8 +14,8 @@ def main() -> int:
     parser.add_argument("--run-dir", type=Path, help="指定输出目录, 默认 data/fund_list/时间戳")
     args = parser.parse_args()
     folder = args.run_dir or ROOT / "data" / "fund_list" / datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = ROOT / "logs/fund_list"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
         handlers=[logging.StreamHandler(), logging.FileHandler(log_dir / "fund_list.log", encoding="utf-8")],

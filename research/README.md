@@ -32,6 +32,8 @@
 
 ## 输出
 
+研究脚本的过程日志保存到 `logs/research/`.
+
 名单快照由 `scripts.update_fund_list` 生成：
 
 | 路径 | 内容 |

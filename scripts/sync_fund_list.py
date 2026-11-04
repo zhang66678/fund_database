@@ -18,8 +18,8 @@ def main() -> int:
     parser.add_argument("--from-list", type=Path, nargs="?", const=ROOT / "data/fund_list",
                         help="复用完整名单目录; 不传路径时取最新本地名单, 不请求接口")
     args = parser.parse_args()
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = ROOT / "logs/fund_list"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
         logging.StreamHandler(), logging.FileHandler(log_dir / "fund_list_sync.log", encoding="utf-8")])
     try:

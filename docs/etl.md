@@ -174,14 +174,19 @@ ts_code
 
 更新结束后查看 JSON 摘要中的状态, 写入数量和失败原因. **强制中断可能没有结束摘要**, 此时以过程日志和数据库记录核对进度.
 
+日志按任务分类存放. 历史文件归入相应目录; 整理时已运行的任务继续写原路径, 等任务结束后再迁移本轮日志.
+
 | 任务 | 过程日志 | 摘要或快照 |
 | --- | --- | --- |
-| 名单同步 | `logs/fund_list_sync.log` | `logs/fund_list_sync_时间戳.json` |
-| 数据更新 | `logs/database_update.log` | `logs/database_update_时间戳.json` |
-| 手动添加 | `logs/add_fund.log` | 批量添加: `logs/add_funds_时间戳.json` |
-| 生成批次 | `logs/add_fund.log` | `data/fund_batches/batch_时间戳.csv`, `logs/fund_batch_时间戳.json` |
-| 名单快照 | 仅下载时为 `logs/fund_list.log` | `data/fund_list/时间戳/` |
+| 名单同步 | `logs/fund_list/fund_list_sync.log` | `logs/fund_list/fund_list_sync_时间戳.json` |
+| 数据更新 | `logs/database/database_update.log` | `logs/database/database_update_时间戳.json` |
+| 建库与快照导入 | `logs/database/database_import.log` | 终端输出 |
+| 手动添加 | `logs/fund_add/add_fund.log` | 批量添加: `logs/fund_add/add_funds_时间戳.json` |
+| 生成批次 | `logs/fund_add/add_fund.log` | `data/fund_batches/batch_时间戳.csv`, `logs/fund_add/fund_batch_时间戳.json` |
+| 名单快照 | 仅下载时为 `logs/fund_list/fund_list.log` | `data/fund_list/时间戳/` |
 | iFinD 分类 | 终端输出 | `data/fund_categories/时间戳/` 中的 `fund_categories.csv` 和 `summary.json` |
+
+研究脚本日志放在 `logs/research/`, 公网演示记录放在 `logs/demo/`, 页面预览记录放在 `logs/previews/`. 中断检查报告放在 `logs/database/`.
 
 名单快照包含 `fund_basic_all.csv`, L/D/I 三份 CSV 和 `list_summary.json`. 三种状态全部获取并校验完成后才生成摘要; 自动选择名单时取目录名最新的完整快照.
 

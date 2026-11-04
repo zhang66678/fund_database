@@ -27,8 +27,8 @@ def main() -> int:
         parser.error("基金代码, --file 和 --from-list 三选一")
     if args.from_list is None and any(value is not None for value in (args.limit, args.status, args.fund_types, args.output)):
         parser.error("--limit, --status, --fund-types 和 --output 仅用于 --from-list 模式")
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = ROOT / "logs/fund_add"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
         logging.StreamHandler(), logging.FileHandler(log_dir / "add_fund.log", encoding="utf-8")])
     try:

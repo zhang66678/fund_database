@@ -66,9 +66,10 @@ def main() -> int:
     args = parser.parse_args()
     output = ROOT / "data" / "single_fund_audit" / datetime.now().strftime("%Y%m%d_%H%M%S")
     output.mkdir(parents=True, exist_ok=False)
-    (ROOT / "logs").mkdir(exist_ok=True)
+    log_dir = ROOT / "logs/research"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(ROOT / "logs/single_fund_audit.log", encoding="utf-8")])
+        logging.StreamHandler(), logging.FileHandler(log_dir / "single_fund_audit.log", encoding="utf-8")])
     summary = {"code": args.code, "requested_end": str(args.end_date), "started_at": datetime.now().isoformat(),
                "source": "Tushare Pro live request", "endpoints": {}, "status": "running"}
     tables = {}
