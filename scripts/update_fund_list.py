@@ -7,6 +7,7 @@ from pathlib import Path
 
 from api.tushare_client import ROOT, Source
 from etl.fund_list import fetch_fund_list
+from scripts.logging_utils import rotating_handler
 
 
 def main() -> int:
@@ -18,7 +19,7 @@ def main() -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(log_dir / "fund_list.log", encoding="utf-8")],
+        handlers=[logging.StreamHandler(), rotating_handler(log_dir / "fund_list.log")],
     )
     try:
         summary = fetch_fund_list(Source(), folder, date.today())

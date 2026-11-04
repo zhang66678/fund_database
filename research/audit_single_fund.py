@@ -15,6 +15,7 @@ from etl.extract import paged
 from api.fund_fields import NAV_FIELDS, DIV_FIELDS
 from etl.extract import fetch_series
 from api.tushare_client import ROOT, FetchError, Source
+from scripts.logging_utils import rotating_handler
 
 
 def inspect_nav(nav: pd.DataFrame, calendar: pd.DataFrame | None) -> dict:
@@ -69,7 +70,7 @@ def main() -> int:
     log_dir = ROOT / "logs/research"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(log_dir / "single_fund_audit.log", encoding="utf-8")])
+        logging.StreamHandler(), rotating_handler(log_dir / "single_fund_audit.log")])
     summary = {"code": args.code, "requested_end": str(args.end_date), "started_at": datetime.now().isoformat(),
                "source": "Tushare Pro live request", "endpoints": {}, "status": "running"}
     tables = {}

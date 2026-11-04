@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from etl.fund_list import latest_snapshot
+from scripts.logging_utils import rotating_handler
 
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger(__name__)
@@ -131,8 +132,8 @@ def main() -> int:
     log_dir = ROOT / 'logs/research'
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
-                        handlers=[logging.StreamHandler(), logging.FileHandler(
-                            log_dir / 'fund_selection.log', encoding='utf-8')])
+                        handlers=[logging.StreamHandler(), rotating_handler(
+                            log_dir / 'fund_selection.log')])
     LOGGER.info('开始筛选最长存续基金')
     try:
         folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'fund_list')

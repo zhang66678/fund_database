@@ -10,6 +10,7 @@ from api.tushare_client import Source
 from database.connection import DATABASE_PATH, ROOT
 from etl.fund_list import fetch_fund_list
 from etl.sync_fund_list import sync_fund_list
+from scripts.logging_utils import rotating_handler
 
 
 def main() -> int:
@@ -21,7 +22,7 @@ def main() -> int:
     log_dir = ROOT / "logs/fund_list"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(log_dir / "fund_list_sync.log", encoding="utf-8")])
+        logging.StreamHandler(), rotating_handler(log_dir / "fund_list_sync.log")])
     try:
         if not args.database.is_file():
             raise FileNotFoundError("请先运行 python -m scripts.init_database 初始化数据库")

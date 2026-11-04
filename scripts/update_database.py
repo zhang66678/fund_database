@@ -11,6 +11,7 @@ import pandas as pd
 from database.connection import DATABASE_PATH, ROOT
 from etl.update_funds import DATASETS, REFRESH_DAYS, update_funds
 from api.tushare_client import MIN_REQUEST_INTERVAL, Source
+from scripts.logging_utils import rotating_handler
 
 
 def main() -> int:
@@ -36,7 +37,7 @@ def main() -> int:
     log_dir = ROOT / "logs/database"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(log_dir / "database_update.log", encoding="utf-8")])
+        logging.StreamHandler(), rotating_handler(log_dir / "database_update.log")])
     try:
         codes = args.codes
         if args.csv_path is not None:

@@ -15,6 +15,7 @@ from api.fund_fields import NAV_FIELDS, ADJ_FIELDS, DIV_FIELDS
 from etl.extract import paged, fetch_series
 from etl.fund_list import latest_snapshot
 from api.tushare_client import ROOT, FetchError, Source
+from scripts.logging_utils import rotating_handler
 
 LOGGER = logging.getLogger(__name__)
 
@@ -108,8 +109,8 @@ def main() -> int:
     log_dir = ROOT / 'logs/research'
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
-                        handlers=[logging.StreamHandler(), logging.FileHandler(
-                            log_dir / 'fund_history.log', encoding='utf-8')])
+                        handlers=[logging.StreamHandler(), rotating_handler(
+                            log_dir / 'fund_history.log')])
     try:
         folder = args.run_dir or latest_snapshot(ROOT / 'data' / 'fund_list')
         selected = folder / 'longest_lived' / 'top_10.csv'

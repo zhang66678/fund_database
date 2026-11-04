@@ -7,6 +7,7 @@ from pathlib import Path
 from database.connection import DATABASE_PATH, ROOT, connect
 from database.schema import initialize
 from etl.import_snapshot import import_snapshot
+from scripts.logging_utils import rotating_handler
 
 
 def main() -> None:
@@ -17,7 +18,7 @@ def main() -> None:
     log_dir = ROOT / "logs/database"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(log_dir / "database_import.log", encoding="utf-8")])
+        logging.StreamHandler(), rotating_handler(log_dir / "database_import.log")])
     try:
         if args.snapshot is not None:
             import_snapshot(args.snapshot, args.database)

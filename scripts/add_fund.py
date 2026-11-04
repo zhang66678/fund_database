@@ -9,6 +9,7 @@ from pathlib import Path
 from database.connection import DATABASE_PATH, ROOT
 from etl.add_funds import DEFAULT_BATCH_SIZE, add_fund, add_funds, prepare_fund_batch
 from api.tushare_client import Source
+from scripts.logging_utils import rotating_handler
 
 
 def main() -> int:
@@ -30,7 +31,7 @@ def main() -> int:
     log_dir = ROOT / "logs/fund_add"
     log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
-        logging.StreamHandler(), logging.FileHandler(log_dir / "add_fund.log", encoding="utf-8")])
+        logging.StreamHandler(), rotating_handler(log_dir / "add_fund.log")])
     try:
         if args.from_list is not None:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
