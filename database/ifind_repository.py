@@ -43,6 +43,10 @@ class IfindFundRepository:
         """首版显式复用本地 SSE 日历, 不视作 iFinD 基金数据."""
         return self._reference.get_calendar()
 
+    def get_index_prices(self, codes: list[str], start_date: date, end_date: date) -> pd.DataFrame:
+        """宽基点位显式复用本地 Tushare 数据, 页面单独标注指数来源."""
+        return self._reference.get_index_prices(codes, start_date, end_date)
+
     def get_peer_category(self, ts_code: str) -> pd.DataFrame:
         """读取 iFinD 投资类型, 保留各层级, 不将运作形式用作同类分组."""
         frame = fetch_categories(self._client, [ts_code])

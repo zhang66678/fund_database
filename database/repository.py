@@ -11,10 +11,19 @@ BASIC_COLUMNS = ["found_date", "fund_type", "benchmark"]
 MANAGER_COLUMNS = ["ann_date", "name", "begin_date", "end_date", "edu", "resume"]
 ASSET_COLUMNS = ["ann_date", "nav_date", "net_asset", "total_netasset"]
 DIVIDEND_COLUMNS = ["ann_date", "ex_date", "record_date", "pay_date", "div_cash", "div_proc"]
+INDEX_NAMES = {"000300.SH": "沪深300", "000905.SH": "中证500", "000852.SH": "中证1000",
+               "000016.SH": "上证50", "399006.SZ": "创业板指"}
 
 
 class FundRepository(Protocol):
     """不同存储实现遵守相同方法和返回约定, 由调用方注入具体实现."""
+
+    def get_index_prices(self, codes: list[str], start_date: date, end_date: date) -> pd.DataFrame:
+        """返回宽基指数的 ts_code, trade_date, close, 按代码和日期排序.
+
+        close 为原始收盘点位, 不归一化. 无记录返回空表, 未接入的来源抛出 ValueError.
+        """
+        ...
 
     def get_peer_category(self, ts_code: str) -> pd.DataFrame:
         """返回最新二级分类的 category, source, snapshot_date, 无匹配返回空表.

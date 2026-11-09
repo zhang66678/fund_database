@@ -2,6 +2,10 @@
 
 
 TABLES = {
+    "index_daily": {
+        "columns": {"ts_code": "VARCHAR", "trade_date": "DATE", "close": "DECIMAL(24,10)"},
+        "key": ("ts_code", "trade_date"),
+    },
     "fund_category": {
         "columns": {"ts_code": "VARCHAR", "source": "VARCHAR", "snapshot_date": "DATE",
                     "category": "VARCHAR", "class_level1": "VARCHAR",

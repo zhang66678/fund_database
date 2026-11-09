@@ -10,6 +10,7 @@ import pandas as pd
 from database.repository import FundRepository, NAV_COLUMNS
 from services.fund_metrics import calculate_metrics
 from services.peer_returns import get_peer_returns
+from services.index_prices import get_index_series
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,10 @@ class FundService:
     def get_peer_returns(self, ts_code: str, as_of: date | None = None) -> dict:
         """固定周期涨幅与细分类本地比较, 独立于图表所选区间和日频指标."""
         return get_peer_returns(self._repository, _normalize_code(ts_code), as_of or date.today())
+
+    def get_index_series(self, codes: list[str], dates: Sequence) -> dict:
+        """复用基金收益曲线的日期和基期, 指数收益基于收盘价计算."""
+        return get_index_series(self._repository, codes, dates)
 
     def get_performance_series(
         self, ts_code: str, start_date: date | None = None, end_date: date | None = None,

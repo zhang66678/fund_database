@@ -9,10 +9,12 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from app.fund_search import fund_candidates
+from services.index_prices import INDEX_NAMES
 
 NAV_LABELS = {"unit_nav": "单位净值", "accum_nav": "累计净值", "adj_nav": "复权单位净值"}
 NAV_COLORS = {"unit_nav": "#2563EB", "accum_nav": "#0D9488", "adj_nav": "#7C3AED"}
 CHART_LABELS = {**NAV_LABELS, "cumulative_return": "累计收益率", "drawdown": "回撤"}
+INDEX_COLORS = dict(zip(INDEX_NAMES, ("#0D9488", "#7C3AED", "#DB2777", "#475569", "#65A30D")))
 RANGES = ("近1个月", "近3个月", "近6个月", "近1年", "近3年", "全部", "自定义")
 METRICS = {
     "annual_return": ("年化收益", ".2%"), "annual_volatility": ("年化波动", ".2%"),
@@ -181,7 +183,17 @@ def show_date_filters(
 
 def show_filters(bounds: tuple[date, date] | None) -> tuple[dict, bool]:
     draft = st.session_state.draft_query
-    conditions = show_date_filters(bounds)
+    date_col, index_col = st.columns([3, 2], gap="medium")
+    with date_col:
+        conditions = show_date_filters(bounds)
+    if "benchmark_codes" not in st.session_state:
+        st.session_state.benchmark_codes = draft.get("benchmarks", [])
+    benchmarks = index_col.multiselect(
+        "宽基对比", options=list(INDEX_NAMES), format_func=INDEX_NAMES.get,
+        key="benchmark_codes", placeholder="选择宽基指数", on_change=remember_query,
+        args=("benchmarks", "benchmark_codes"),
+        help="与基金累计收益共用基期和右侧百分比轴, 选择后点击查询. 指数使用本地 Tushare 收盘价计算涨幅.",
+    )
     if "nav_types" not in st.session_state:
         st.session_state.nav_types = draft["selected"]
     curve_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
@@ -191,7 +203,7 @@ def show_filters(bounds: tuple[date, date] | None) -> tuple[dict, bool]:
         help="净值使用左轴, 累计收益率使用右轴, 回撤展示在下方. 收益和回撤基于复权净值.",
     )
     submitted = button_col.button("查询", key="submit_query", type="primary", width="stretch")
-    return {**conditions, "selected": list(selected)}, submitted
+    return {**conditions, "selected": list(selected), "benchmarks": list(benchmarks)}, submitted
 
 
 def _date_text(value) -> str:
@@ -240,6 +252,7 @@ def line_markers(values: pd.Series) -> dict:
 
 def show_chart(result: dict | None) -> None:
     selected = [] if result is None else result["selected"]
+    show_return = "cumulative_return" in selected or bool(result and result.get("benchmarks"))
     has_drawdown = result is None or "drawdown" in selected
     # 主图左轴放净值, 右轴放收益; 下方回撤区与主图联动日期缩放.
     figure = make_subplots(
@@ -265,7 +278,7 @@ def show_chart(result: dict | None) -> None:
             ), row=1, col=1, secondary_y=False)
         series = result.get("performance_series")
         if series is not None and not series.empty:
-            if "cumulative_return" in selected:
+            if show_return:
                 figure.add_trace(go.Scatter(
                     x=series.nav_date, y=series.cumulative_return, name="累计收益率",
                     **line_markers(series.cumulative_return),
@@ -284,6 +297,24 @@ def show_chart(result: dict | None) -> None:
                 st.caption("收益与回撤存在缺失开市日, 已保留断点; 回撤仅按区间内已观测净值峰值计算.")
         elif result.get("series_error"):
             st.warning(f"收益与回撤曲线暂不可绘制: {result['series_error']}")
+        indices = result.get("index_series") or {}
+        for code, curve in indices.get("series", {}).items():
+            figure.add_trace(go.Scatter(
+                x=curve.nav_date, y=curve.cumulative_return, name=INDEX_NAMES[code],
+                **line_markers(curve.cumulative_return), connectgaps=False,
+                line=dict(color=INDEX_COLORS[code], width=1.8, dash="dot"),
+                hovertemplate="%{y:.2%}<extra>%{fullData.name}</extra>",
+            ), row=1, col=1, secondary_y=True)
+        for code, reason in indices.get("errors", {}).items():
+            st.warning(f"{INDEX_NAMES[code]}: {reason}")
+        if result.get("index_error"):
+            st.warning(f"宽基对比暂不可用: {result['index_error']}")
+        if indices.get("series"):
+            coverage = " | ".join(
+                f"{INDEX_NAMES[code]}截至{curve.loc[curve.cumulative_return.notna(), 'nav_date'].max():%Y-%m-%d}"
+                for code, curve in indices["series"].items()
+            )
+            st.caption(f"宽基指数: Tushare（本地收盘价涨幅） | {coverage}")
         st.caption(f"当前展示: {result['name']} · {result['code']} | 实际净值日期: {_date_text(nav.nav_date.iloc[0])} 至 {_date_text(nav.nav_date.iloc[-1])}")
     style_chart(figure)
     figure.update_layout(height=560 if has_drawdown else 440)
@@ -295,7 +326,7 @@ def show_chart(result: dict | None) -> None:
     figure.update_yaxes(title_text="净值", tickformat=".4f", row=1, col=1, secondary_y=False)
     figure.update_yaxes(
         title_text="累计收益率", tickformat=".2%", showgrid=False,
-        visible="cumulative_return" in selected, title_font_color="#D97706", tickfont_color="#D97706",
+        visible=show_return, title_font_color="#D97706", tickfont_color="#D97706",
         row=1, col=1, secondary_y=True,
     )
     if has_drawdown:

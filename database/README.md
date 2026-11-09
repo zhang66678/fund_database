@@ -13,6 +13,7 @@
 | `fund_manager` | `ts_code, ann_date, name, begin_date, end_date, edu, resume` | `ts_code, name, begin_date, ann_date` |
 | `fund_asset` | `ts_code, ann_date, nav_date, net_asset, total_netasset` | `ts_code, nav_date, ann_date` |
 | `fund_category` | `ts_code, source, snapshot_date, category, class_level1, class_level2, class_level3` | `ts_code, source, snapshot_date` |
+| `index_daily` | `ts_code, trade_date, close` | `ts_code, trade_date` |
 
 类型约定：
 
@@ -69,6 +70,9 @@
 | `get_dividends(code)` | 分红披露，按除息日、公告日倒序 |
 | `get_peer_category(code)` | 最近采集的 iFinD 一级/二级分组路径, 原始三级分类, 来源和获取日期 |
 | `get_peer_nav_points(code, dates)` | 本地同类基金在指定日期的最新公告版复权净值 |
+| `get_index_prices(codes, start, end)` | 本地指数的代码, 交易日和收盘点位 |
+
+旧库尚无 `index_daily` 表时, 只读查询返回空表, 页面不执行建表或下载. 指数更新命令创建缺失表, 通过现有 UPSERT 按指数代码和交易日写入. iFinD 适配器显式复用本地指数行情, CSV 模式暂不支持.
 
 iFinD 经理返回中附带 `position_status`，任职公告日期保持缺失，学历与简历仅补充现任经理。iFinD 资产返回中附带 `total_asset`（资产总值），不写入含义不同的 `total_netasset`；页面分别标注报告期与季度报告披露日期。字段和参数统一见 [iFinD 数据源](../docs/data-sources.md#ifind)。
 

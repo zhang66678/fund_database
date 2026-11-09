@@ -65,6 +65,22 @@ Tushare 和 iFinD 的配置见 [数据源](data-sources.md), 表结构与写入�
 
 分组采用 iFinD 的 `一级 / 二级` 投资类型, 同时保留原始三级分类. 每只基金使用最近采集的分类; 同日重跑更新同日记录. 一级或二级缺失时记录为空分组, 不沿用旧分类.
 
+### 宽基指数行情
+
+基金分析图表中的宽基对比需要单独采集指数行情. 停止 Streamlit 后运行:
+
+```powershell
+# 首次回填全部五个指数; 后续同一命令按各指数最新日期增量更新
+.\.venv\Scripts\python.exe -m scripts.update_index_prices
+
+# 只更新沪深300和中证500
+.\.venv\Scripts\python.exe -m scripts.update_index_prices --codes 000300.SH 000905.SH
+```
+
+默认从 1990-01-01 查询, 实际历史以接口返回为准. 支持 `--start-date YYYY-MM-DD`, `--end-date YYYY-MM-DD`, `--full-history` 和 `--database`. 增量覆盖各指数最后数据日及之前六个自然日, 更早修订需加 `--full-history`.
+
+每五年一段请求, 单个指数全部获取成功后才提交. 某指数失败保留原数据并继续其他指数, 摘要标记 `partial`. 此命令不下载基金数据, `update_database` 也不会自动更新指数. 字段和账号权限见 [数据源](data-sources.md#index_daily).
+
 ## 指定范围与参数
 
 ### 更新哪些基金
@@ -180,6 +196,7 @@ ts_code
 | --- | --- | --- |
 | 名单同步 | `logs/fund_list/fund_list_sync.log` | `logs/fund_list/fund_list_sync_时间戳.json` |
 | 数据更新 | `logs/database/database_update.log` | `logs/database/database_update_时间戳.json` |
+| 指数行情 | `logs/database/index_prices.log` | `logs/database/index_prices_时间戳.json` |
 | 建库与快照导入 | `logs/database/database_import.log` | 终端输出 |
 | 手动添加 | `logs/fund_add/add_fund.log` | 批量添加: `logs/fund_add/add_funds_时间戳.json` |
 | 生成批次 | `logs/fund_add/add_fund.log` | `data/fund_batches/batch_时间戳.csv`, `logs/fund_add/fund_batch_时间戳.json` |

@@ -64,6 +64,9 @@ class CsvFundRepository:
         frame = _read_columns(self._calendar_path, ["exchange", "cal_date", "is_open"])
         return frame.loc[frame.exchange.eq("SSE"), ["cal_date", "is_open"]].copy()
 
+    def get_index_prices(self, codes: list[str], start_date: date, end_date: date) -> pd.DataFrame:
+        raise ValueError("CSV 对照模式暂不提供宽基指数行情")
+
     def get_managers(self, ts_code: str) -> pd.DataFrame:
         """旧 CSV 对照模式尚未提供经理资料, 不混用数据库数据."""
         raise ValueError("CSV 对照模式暂不提供基金经理资料")

@@ -11,7 +11,7 @@ from database.connection import ROOT
 
 
 SUMMARY_PREFIXES = {
-    "database": ("database_update_", "interrupted_update_check_"),
+    "database": ("database_update_", "interrupted_update_check_", "index_prices_"),
     "fund_add": ("add_funds_", "fund_batch_"),
     "fund_list": ("fund_list_sync_",),
     "research": ("fund_details_",),

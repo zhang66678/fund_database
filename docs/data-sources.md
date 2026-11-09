@@ -25,6 +25,14 @@
 | `fund_div` | 分红披露 | `ts_code, ann_date, div_proc, record_date, ex_date, pay_date, div_cash, net_ex_date, account_date` |
 | `fund_manager` | 基金经理任职历史 | `ts_code, ann_date, name, begin_date, end_date, edu, resume` |
 | `trade_cal` | SSE 交易日历 | `exchange, cal_date, is_open` |
+| `index_daily` | 宽基指数历史收盘价 | `ts_code, trade_date, close` |
+
+### `index_daily`
+
+- [官方指数日线接口](https://tushare.pro/document/2?doc_id=95) 提供收盘点位, 当前文档要求累计 2000 积分; 实际可用权限由账号决定.
+- 支持沪深300(`000300.SH`), 中证500(`000905.SH`), 中证1000(`000852.SH`), 上证50(`000016.SH`)和创业板指(`399006.SZ`).
+- 每五年一个窗口请求, 校验代码, 日期范围和有效正收盘价, 按代码和交易日 UPSERT 到 `index_daily`. 价格指数涨幅不额外加入成分股分红.
+- 采集复用现有 Tushare 客户端的限频, 重试和凭证配置. 页面只读本地指数表, 不触发下载.
 
 ### `fund_basic`
 

@@ -61,6 +61,16 @@ class DuckDBFundRepository:
         ''')
         return dict(zip(frame.ts_code, frame.name))
 
+    def get_index_prices(self, codes: list[str], start_date: date, end_date: date) -> pd.DataFrame:
+        exists = self._query("SELECT 1 FROM information_schema.tables WHERE table_name='index_daily'")
+        if exists.empty:
+            return pd.DataFrame(columns=["ts_code", "trade_date", "close"])
+        return self._query('''
+            SELECT ts_code, trade_date, CAST(close AS DOUBLE) AS close FROM index_daily
+            WHERE ts_code IN (SELECT unnest(?)) AND trade_date BETWEEN ? AND ?
+            ORDER BY ts_code, trade_date
+        ''', [codes, start_date, end_date])
+
     def get_peer_category(self, ts_code: str) -> pd.DataFrame:
         """每只基金使用最近采集的 iFinD 二级分类, 最新缺失时不回退旧分类."""
         exists = self._query("SELECT 1 FROM information_schema.tables WHERE table_name='fund_category'")

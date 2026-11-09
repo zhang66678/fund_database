@@ -42,7 +42,7 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
     st.session_state.query_result = None
     st.session_state.query_feedback = None
     try:
-        if not conditions["selected"]:
+        if not conditions["selected"] and not conditions.get("benchmarks"):
             raise ValueError("请至少选择一种曲线")
         if bounds_error:
             raise ValueError(bounds_error)
@@ -64,6 +64,7 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
                 "details": details, "metrics": None, "metrics_error": None,
                 "performance_series": None, "series_error": None,
                 "peer_returns": None, "peer_returns_error": None,
+                "index_series": None, "index_error": None,
                 "fetched_at": nav.attrs.get("fetched_at"),
             }
             for dataset, error in details["errors"].items():
@@ -73,12 +74,20 @@ def _run_query(service, funds: dict, conditions: dict, bounds, bounds_error: str
                     "level": "info", "message": "所选来源没有该基金在所选日期内的净值数据, 请检查代码和日期范围.",
                 }
             else:
-                if any(field in conditions["selected"] for field in ("cumulative_return", "drawdown")):
+                if conditions.get("benchmarks") or any(field in conditions["selected"] for field in ("cumulative_return", "drawdown")):
                     try:
                         result["performance_series"] = service.get_performance_series(code, start, end)
                     except (ValueError, OSError, UnicodeError) as exc:
                         logger.warning("Performance series unavailable: %s", exc)
                         result["series_error"] = str(exc)
+                if conditions.get("benchmarks") and result["performance_series"] is not None:
+                    try:
+                        result["index_series"] = service.get_index_series(
+                            conditions["benchmarks"], result["performance_series"].nav_date,
+                        )
+                    except (ValueError, OSError, UnicodeError) as exc:
+                        logger.warning("Index series unavailable: %s", exc)
+                        result["index_error"] = str(exc)
                 try:
                     result["metrics"] = service.get_metrics(code, start, end)
                 except (ValueError, OSError, UnicodeError) as exc:
@@ -107,6 +116,7 @@ def _has_pending_changes(result: dict, conditions: dict) -> bool:
     return (
         result["code"] != choice_code(conditions["code"])
         or any(result[key] != conditions[key] for key in ("start", "end", "selected"))
+        or result.get("benchmarks", []) != conditions.get("benchmarks", [])
     )
 
 

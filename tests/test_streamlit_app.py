@@ -73,6 +73,65 @@ def test_keyword_candidates_preserve_selected_beyond_limit_and_ignore_case():
     assert fund_candidates(funds, " ", ["000079.OF"])[0] == {"000079.OF": "Alpha基金79"}
 
 
+def test_benchmark_selection_submission_axes_gaps_and_navigation(page, monkeypatch):
+    app, path = page
+    with connect(path) as db:
+        db.executemany("INSERT INTO index_daily VALUES (?,?,?)", [
+            ("000300.SH", "2020-01-01", 100), ("000300.SH", "2020-01-03", 110),
+            ("000905.SH", "2020-01-01", 200), ("000905.SH", "2020-01-02", 190),
+            ("000905.SH", "2020-01-03", 220),
+        ])
+    calls = []
+    original = FundService.get_index_series
+
+    def query(service, *args):
+        calls.append(args[0])
+        return original(service, *args)
+
+    monkeypatch.setattr(FundService, "get_index_series", query)
+    select_fund(app, "000001.OF")
+    app.multiselect(key="benchmark_codes").set_value(["000300.SH", "000905.SH"]).run()
+    # 选择宽基后自动提供基金累计收益, 无须另选收益曲线.
+    app.multiselect(key="nav_types").set_value(["unit_nav"]).run()
+    assert not calls
+    app.button(key="submit_query").click().run()
+    assert calls == [["000300.SH", "000905.SH"]]
+    chart = traces(app)
+    assert [t["name"] for t in chart] == ["单位净值", "累计收益率", "沪深300", "中证500"]
+    assert all(t["yaxis"] == "y2" for t in chart[1:])
+    spec = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert spec["layout"]["yaxis2"]["visible"] is True
+    curves = app.session_state["query_result"]["index_series"]["series"]
+    assert curves["000300.SH"].cumulative_return.iloc[[0, 2]].tolist() == pytest.approx([0, .1])
+    assert pd.isna(curves["000300.SH"].cumulative_return.iloc[1])
+    assert curves["000905.SH"].cumulative_return.tolist() == pytest.approx([0, -.05, .1])
+    assert all(t["connectgaps"] is False for t in chart)
+    app.multiselect(key="benchmark_codes").set_value(["000300.SH"]).run()
+    assert traces(app) == chart and len(calls) == 1
+    assert any("条件已修改" in item.value for item in app.info)
+    app.radio(key="workspace_page").set_value("数据说明").run()
+    app.radio(key="workspace_page").set_value("基金分析").run()
+    assert app.multiselect(key="benchmark_codes").value == ["000300.SH"]
+    assert traces(app) == chart and len(calls) == 1
+    app.button(key="submit_query").click().run()
+    assert [t["name"] for t in traces(app)][-1] == "沪深300"
+    app.multiselect(key="benchmark_codes").set_value([]).run()
+    app.button(key="submit_query").click().run()
+    assert [t["name"] for t in traces(app)] == ["单位净值"]
+
+
+def test_missing_index_table_keeps_fund_chart_and_metrics(page):
+    app, path = page
+    with connect(path) as db:
+        db.execute("DROP TABLE index_daily")
+    select_fund(app, "000002.OF")
+    app.multiselect(key="benchmark_codes").set_value(["000300.SH"]).run()
+    app.button(key="submit_query").click().run()
+    assert not app.exception and len(traces(app)) == 3
+    assert app.session_state["query_result"]["details"]["basic"] is not None
+    assert any("没有指数行情" in item.value for item in app.warning)
+
+
 def test_search_pending_changes_and_navigation_preserve_results(page):
     app, _ = page
     assert traces(app) == []
