@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -67,7 +68,11 @@ def main() -> int:
             summary["source_file"] = str(args.file)
         path = log_dir / f"ifind_nav_{datetime.now():%Y%m%d_%H%M%S_%f}.json"
         path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        counts = Counter(item["status"] for item in summary["results"])
+        logging.info("iFinD 更新结束: 基金=%s 成功=%s 空数据=%s 失败=%s 耗时=%.1f分钟",
+                     summary["funds"], counts["ok"], counts["empty"], counts["failed"],
+                     summary["elapsed_seconds"] / 60)
+        logging.info("完整明细: %s", path)
         return int(summary["status"] != "completed")
     except (ValueError, OSError, duckdb.Error) as exc:
         logging.error("iFinD NAV update failed: %s", exc)

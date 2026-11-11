@@ -117,7 +117,8 @@ def test_init_only_command_does_not_load_api_credentials(tmp_path, monkeypatch):
         assert db.execute("SHOW TABLES").fetchall() == [("fund_nav",)]
 
 
-def test_default_command_updates_shared_list_and_keeps_all_alias(tmp_path, monkeypatch):
+def test_default_command_updates_shared_list_and_keeps_all_alias(tmp_path, monkeypatch, caplog, capsys):
+    caplog.set_level("INFO")
     path, reference, client = tmp_path / "ifind.duckdb", tmp_path / "tushare.duckdb", NavClient()
     with connect(reference) as db:
         initialize(db)
@@ -142,6 +143,8 @@ def test_default_command_updates_shared_list_and_keeps_all_alias(tmp_path, monke
     summary = json.loads(report.read_text(encoding="utf-8"))
     assert summary["workers"] == 2 and summary["request_interval"] == client.interval == .3
     assert reference.read_bytes() == before
+    assert "成功=2" in caplog.text and "完整明细:" in caplog.text
+    assert '"results"' not in capsys.readouterr().out
 
 
 def test_concurrent_fetch_keeps_writes_on_main_thread_and_isolates_failure(tmp_path, monkeypatch):
