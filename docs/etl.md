@@ -6,17 +6,14 @@ Tushare 和 iFinD 的配置见 [数据源](data-sources.md), 表结构与写入�
 
 ## 日常同步入库
 
-日常维护按顺序执行两步: **同步名单, 再更新净值与交易日历.**
+日常维护按顺序执行两步: **同步公共名单, 再更新所需来源的数据.** 两源共用 Tushare 库中的名单, iFinD 库只保存净值, 无需另外导入一份名单.
+
+### 1. 同步公共名单
 
 ```powershell
-# 1. 获取最新名单, 添加新基金, 更新已有基金的基础资料和状态
+# 获取最新名单, 添加新基金, 更新已有基金的基础资料和状态
 .\.venv\Scripts\python.exe -m scripts.sync_fund_list
-
-# 2. 更新全库净值和 SSE 日历, 使用 8 并发
-.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav calendar --workers 8
 ```
-
-已有净值的基金按增量窗口更新, 尚无净值的基金从成立日回填. 首次回填通常比日常增量更新耗时更长.
 
 **今天已下载过名单**, 第一步可替换为:
 
@@ -36,6 +33,22 @@ Tushare 和 iFinD 的配置见 [数据源](data-sources.md), 表结构与写入�
 | 非六位代码, 名称缺失, 成立日期无效 | 跳过该记录, 在 `skipped_records` 中列出原因; 已有资料保持原样 |
 
 同步覆盖 L(存续), D(终止), I(发行) 三种状态, 入库代码格式为六位数字加 `.OF`. 名单同步只写基础资料; 净值等数据和 iFinD 分类分别由对应命令更新.
+
+### 2. 更新数据
+
+按使用的数据源选择命令, 需要同时维护两库时依次执行:
+
+```powershell
+# Tushare: 更新全库净值和 SSE 日历, 使用 8 并发
+.\.venv\Scripts\python.exe -m scripts.update_database --datasets nav calendar --workers 8
+
+# iFinD: 更新公共名单中的全库净值, 使用 4 并发
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --workers 4
+```
+
+已有净值的基金按各自数据库的最新日期增量更新; 尚无净值的新基金从成立日回填. 首次全库回填通常比日常更新耗时更长. iFinD 的 `--all` 保留为默认全库行为的别名.
+
+两源均支持 `--codes`, `--file`, `--nav-state`, `--refresh-days`, `--end-date`, `--full-history`, `--workers`, `--request-interval` 和 `--database`. `existing/missing` 按目标来源自己的净值库判断, 请求间隔下限按来源分别设置.
 
 ## 按需更新其他数据
 
@@ -64,6 +77,46 @@ Tushare 和 iFinD 的配置见 [数据源](data-sources.md), 表结构与写入�
 默认每次请求 20 只基金; `--batch-size` 可设为 1 至 100. 添加 `--snapshot-only` 时仅保存分类快照. `--run-dir` 可指定尚未存在的输出目录.
 
 分组采用 iFinD 的 `一级 / 二级` 投资类型, 同时保留原始三级分类. 每只基金使用最近采集的分类; 同日重跑更新同日记录. 一级或二级缺失时记录为空分组, 不沿用旧分类.
+
+### iFinD 独立净值库
+
+只保存三种净值和获取时间, 默认文件为 `data/ifind_nav.duckdb`. 不写入 Tushare 库, 不采集基础资料, 分红, 经理, 资产或分类, 也不切换页面来源.
+
+```powershell
+# 只建库, 不请求接口或读取凭证
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --init-only
+
+# 日常全库更新, 使用 4 并发
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --workers 4
+
+# 只更新 iFinD 库已有净值的基金, 暂不回填新基金
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --nav-state existing --workers 4
+
+# 只采集 iFinD 库尚无净值的基金
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --nav-state missing --workers 4
+
+# 指定基金或 CSV 批次, 与 Tushare 使用同一格式
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --codes 000001 000216
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --file data/fund_batches/batch_001.csv
+
+# 按指定区间核对历史, 已采集过的基金加 --full-history 才会复查整个区间
+.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --codes 000001 --start-date 2023-01-01 --full-history
+
+# 只读核对两库, 输出同日净值和共同基期复权收益差异
+.\.venv\Scripts\python.exe -m research.compare_nav_sources --codes 000001 000216 110003 000311 110020 000171
+```
+
+默认采集公共名单中的全部基金; `--codes` 与 `--file` 互斥, CSV 必须有非空 `ts_code` 列, 空批次会报错, 不回退为全库. 名单沿用 `sync_fund_list` 的结果, 新增基金在下一次全库更新时自动纳入. `--start-date` 默认取本地成立日期, `--end-date` 默认今天; 名单外代码需要显式起始日. `--database` 指定独立净值库, `--reference-database` 指定只读名单库.
+
+`--refresh-days` 默认 `7`, 按自身最后数据日及之前六个自然日增量请求, 加 `--full-history` 复查整个区间. `--nav-state` 默认 `all`, 可与指定代码或批次组合使用. 单基金各段全部成功后提交, 失败保留该基金原数据并继续其他基金. 三种净值全空的占位行不入库, 不删除历史; 重取时刷新获取时间, 也计入更新数量.
+
+`--workers` 默认 `1`, 可选 `1` 至 `16`, 日常示例使用 `4`. 工作线程只取数和清洗, 主线程串行写库, 在途基金数限制为并发数的两倍. `--request-interval` 是所有线程共用的请求间隔, 默认 `0.15` 秒, 最小 `0.1` 秒. 鉴权和缓存加锁, 不会让所有网络请求串行等待. 接口频率说明见 [数据源](data-sources.md#页面配置与请求).
+
+每个工作线程复用自己的 HTTP 连接, 整轮任务复用主线程写库连接, 避免逐次建连和重复检查表结构; 每只基金仍单独提交或回滚. 过程日志的 `fetch` 为取数及解析耗时, `write` 为写入耗时, 可据此判断耗时来源. 若主要等待接口响应, 可提高 `--workers` 至 `8`; 更短的请求间隔不会消除接口响应时间.
+
+正在运行的旧任务继续按启动时的代码执行, 新增并发参数需在下次启动命令时使用. 重跑会按 iFinD 库实际末日增量处理, 已提交数据保留.
+
+核对命令只读取本地数据, 不请求接口. 默认输出到 `data/nav_comparison/时间戳/`, 包含 `nav_comparison.csv` 和 `summary.json`; 支持 `--start-date`, `--end-date`, `--tolerance`(默认绝对误差 `1e-6`), `--ifind-database`, `--tushare-database` 和 `--output`. Tushare 按净值日取最新公告, 日期外连接保留单侧记录; 复权净值除原值外, 额外按首个共同有效日期归一化核对累计收益.
 
 ### 宽基指数行情
 
@@ -202,6 +255,7 @@ ts_code
 | 生成批次 | `logs/fund_add/add_fund.log` | `data/fund_batches/batch_时间戳.csv`, `logs/fund_add/fund_batch_时间戳.json` |
 | 名单快照 | 仅下载时为 `logs/fund_list/fund_list.log` | `data/fund_list/时间戳/` |
 | iFinD 分类 | 终端输出 | `data/fund_categories/时间戳/` 中的 `fund_categories.csv` 和 `summary.json` |
+| iFinD 净值 | `logs/database/ifind_nav.log` | `logs/database/ifind_nav_时间戳.json` |
 
 研究脚本日志放在 `logs/research/`, 公网演示记录放在 `logs/demo/`, 页面预览记录放在 `logs/previews/`. 中断检查报告放在 `logs/database/`.
 

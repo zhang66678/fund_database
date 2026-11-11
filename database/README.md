@@ -2,6 +2,25 @@
 
 系统使用 DuckDB 单文件存储，默认路径 `data/fund_database.duckdb`。表结构、UPSERT 和查询实现都在 `database/`。
 
+iFinD 抽样核对使用独立的 `data/ifind_nav.duckdb`, 仅保存净值, 不与上述 Tushare 库混写. 页面 iFinD 适配器仍在线查询, 不自动读取此库.
+
+## iFinD 净值专用库
+
+`schema.py` 中的 `IFIND_TABLES` 独立定义结构, `initialize_ifind` 只创建一张 `fund_nav` 表:
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `ts_code` | `VARCHAR` | 六位基金代码加 `.OF` |
+| `nav_date` | `DATE` | 净值日期 |
+| `unit_nav`, `accum_nav`, `adj_nav` | `DECIMAL(24,10)` | 单位, 累计和复权净值, 保留缺失 |
+| `fetched_at` | `TIMESTAMP` | 本次各段最早获取时间, 统一 UTC |
+
+主键为 `(ts_code, nav_date)`, 重复采集 UPSERT 更新当前序列. 接口不提供公告版本日期, 不构造 `ann_date`, 不保存 Tushare 版本字段. 三列全空的日期占位不入库. 建库拒绝 Tushare 库路径及不兼容的表结构. 操作命令见 [iFinD 独立净值库](../docs/etl.md#ifind-独立净值库).
+
+日常名单复用 Tushare 库的 `fund_basic`, 由同一 `scripts.sync_fund_list` 维护; iFinD 库不增加名单表. 默认全库更新从公共名单选取基金, `--nav-state existing/missing` 则按 iFinD 库自己的净值记录筛选.
+
+`ifind_nav_store.nav_writer` 在整轮更新中复用一个主线程连接, 表结构只检查一次, 每只基金单独事务提交, 写入失败回滚后继续后续基金. 单次写入仍可使用 `save_nav` 入口.
+
 ## 表结构
 
 | 表 | 字段 | 主键 |

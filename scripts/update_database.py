@@ -6,10 +6,9 @@ import logging
 from datetime import date, datetime
 from pathlib import Path
 
-import pandas as pd
-
 from database.connection import DATABASE_PATH, ROOT
 from etl.update_funds import DATASETS, REFRESH_DAYS, update_funds
+from etl.update_scope import NAV_STATES, read_update_codes
 from api.tushare_client import MIN_REQUEST_INTERVAL, Source
 from scripts.logging_utils import rotating_handler
 
@@ -24,7 +23,7 @@ def main() -> int:
     parser.add_argument("--full-history", action="store_true", help="对所选净值, 资产或日历复查全部历史")
     parser.add_argument("--workers", type=int, default=1, choices=range(1, 17), metavar="1-16",
                         help="并发取数线程数, 默认 1; 数据库仍由主线程写入")
-    parser.add_argument("--nav-state", choices=("all", "existing", "missing"), default="all",
+    parser.add_argument("--nav-state", choices=NAV_STATES, default="all",
                         help="按是否已有净值筛选基金: all 全部, existing 已有, missing 尚无; 默认 all")
     parser.add_argument("--request-interval", type=float, default=0.15,
                         help="所有线程共享的请求最小间隔(秒), 默认 0.15, 最小 0.12 (500次/分钟)")
@@ -39,12 +38,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=[
         logging.StreamHandler(), rotating_handler(log_dir / "database_update.log")])
     try:
-        codes = args.codes
-        if args.csv_path is not None:
-            batch = pd.read_csv(args.csv_path, dtype=str, encoding="utf-8-sig", keep_default_na=False)
-            if "ts_code" not in batch.columns:
-                raise ValueError("批次 CSV 必须包含 ts_code 列")
-            codes = batch.ts_code.tolist()
+        codes = read_update_codes(args.codes, args.csv_path)
         source = Source()
         source.interval = args.request_interval
         summary = update_funds(source, args.database, end=args.end_date,

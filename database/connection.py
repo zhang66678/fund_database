@@ -8,6 +8,7 @@ import duckdb
 
 ROOT = Path(__file__).resolve().parents[1]
 DATABASE_PATH = ROOT / "data/fund_database.duckdb"
+IFIND_DATABASE_PATH = ROOT / "data/ifind_nav.duckdb"
 
 
 @contextmanager

@@ -55,7 +55,7 @@ def http(monkeypatch):
                           "adjustedNAV": [1.8, 2.0, 1.9, 2.1]}}]}
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: data)
 
-    monkeypatch.setattr("api.ifind_client.requests.post", post)
+    monkeypatch.setattr("api.ifind_client.requests.Session.post", lambda session, *a, **kw: post(*a, **kw))
     return calls
 
 
@@ -126,7 +126,7 @@ def test_http_failures_are_readable_and_do_not_expose_credentials(monkeypatch, f
         return SimpleNamespace(raise_for_status=lambda: None,
                                json=lambda: {"errorcode": -1, "errmsg": "secret-test-token"})
 
-    monkeypatch.setattr("api.ifind_client.requests.post", post)
+    monkeypatch.setattr("api.ifind_client.requests.Session.post", lambda session, *a, **kw: post(*a, **kw))
     with pytest.raises(ValueError, match="iFinD") as error:
         IfindClient().query("basic_data_service", {})
     assert "secret-test-token" not in str(error.value)
@@ -139,6 +139,76 @@ def test_all_history_starts_at_ifind_found_date(http):
     assert payload["startdate"] == "2026-09-21"
     assert payload["functionpara"]["Fill"] == "Blank"
     assert len(nav) == 4
+
+
+def test_concurrent_requests_share_authentication_and_overlap_http(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+
+    monkeypatch.setenv("IFIND_REFRESH_TOKEN", "test-refresh-token")
+    barrier, lock, endpoints = Barrier(2), Lock(), []
+    from threading import get_ident
+    sessions, closed = {}, []
+    original_close = requests.Session.close
+
+    def post(url, *, headers, json, timeout):
+        endpoint = url.rsplit("/", 1)[-1]
+        with lock:
+            endpoints.append(endpoint)
+        if endpoint == "get_access_token":
+            data = {"errorcode": 0, "data": {"access_token": "test-access-token"}}
+        else:
+            # 若网络请求被状态锁串行化, 两个请求无法同时到达这里.
+            barrier.wait(timeout=5)
+            data = {"errorcode": 0, "tables": [{"value": json["code"]}]}
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: data)
+
+    def session_post(session, *a, **kw):
+        with lock:
+            sessions.setdefault(get_ident(), set()).add(id(session))
+        return post(*a, **kw)
+
+    def close(session):
+        closed.append(id(session))
+        original_close(session)
+
+    monkeypatch.setattr("api.ifind_client.requests.Session.post", session_post)
+    monkeypatch.setattr("api.ifind_client.requests.Session.close", close)
+    client = IfindClient()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda code: client.query("cmd_history_quotation", {"code": code}), ["A", "B"]))
+    assert endpoints.count("get_access_token") == 1 and endpoints.count("cmd_history_quotation") == 2
+    assert [r["tables"][0]["value"] for r in results] == ["A", "B"]
+    results[0]["tables"][0]["value"] = "modified"
+    assert client.query("cmd_history_quotation", {"code": "A"})["tables"][0]["value"] == "A"
+    assert len(endpoints) == 3
+    assert len(sessions) == 2 and all(len(ids) == 1 for ids in sessions.values())
+    session_ids = set().union(*sessions.values())
+    assert len(session_ids) == 2
+    client.close()
+    assert set(closed) == session_ids
+
+
+@pytest.mark.parametrize("interval", [.15, .01])
+def test_all_http_requests_share_pacing_and_cache_hits_do_not_request(monkeypatch, interval):
+    monkeypatch.setenv("IFIND_REFRESH_TOKEN", "test-refresh-token")
+    now, starts = [100.0], []
+    monkeypatch.setattr("api.ifind_client.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("api.ifind_client.time.sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+
+    def post(url, **kwargs):
+        starts.append(now[0])
+        data = ({"errorcode": 0, "data": {"access_token": "test-access-token"}}
+                if url.endswith("get_access_token") else {"errorcode": 0, "tables": []})
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: data)
+
+    monkeypatch.setattr("api.ifind_client.requests.Session.post", lambda session, *a, **kw: post(*a, **kw))
+    client = IfindClient()
+    client.interval = interval
+    for code in ("A", "B", "C", "C"):
+        client.query("cmd_history_quotation", {"code": code})
+    assert len(starts) == 4
+    assert all(b - a >= max(.1, interval) - 1e-9 for a, b in zip(starts, starts[1:]))
 
 
 def test_conflicting_nav_is_rejected_instead_of_choosing_a_value(http, monkeypatch):
@@ -213,7 +283,7 @@ def test_one_detail_failure_does_not_replace_it_with_reference_data(http, monkey
 def test_report_empty_result_is_distinct_from_failure(http, monkeypatch, message, empty):
     client = IfindClient()
     client.query("basic_data_service", {"codes": "003349.OF", "indipara": []})
-    monkeypatch.setattr("api.ifind_client.requests.post", lambda *args, **kwargs: SimpleNamespace(
+    monkeypatch.setattr("api.ifind_client.requests.Session.post", lambda *args, **kwargs: SimpleNamespace(
         raise_for_status=lambda: None, json=lambda: {"errorcode": -4001, "errmsg": message},
     ))
     if empty:

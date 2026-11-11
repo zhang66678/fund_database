@@ -2,7 +2,6 @@
 
 import logging
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -14,9 +13,9 @@ from database.schema import initialize
 from database.writer import calendar_last_date, update_targets, write_batch
 from etl.import_snapshot import normalize
 from etl.update_fund_data import fetch_fund_update, save_fund_update
+from etl.update_scope import NAV_STATES, REFRESH_DAYS, fetch_updates
 
 
-REFRESH_DAYS = 7
 DATASETS = ("basic", "nav", "dividend", "manager", "asset", "calendar")
 
 
@@ -40,7 +39,7 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
     end = end or date.today()
     if not 1 <= workers <= 16:
         raise ValueError("workers must be between 1 and 16")
-    if nav_state not in ("all", "existing", "missing"):
+    if nav_state not in NAV_STATES:
         raise ValueError("nav_state must be all, existing or missing")
     if refresh_days < 1:
         raise ValueError("refresh_days must be positive")
@@ -122,12 +121,7 @@ def update_funds(source, database_path: Path = DATABASE_PATH, *,
                     summary["status"] = "partial"
                 logging.info("更新进度 %s/%s code=%s", index, len(targets), record["code"])
 
-        if workers == 1:
-            save_results(map(prepare, targets))
-        else:
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="fund-fetch") as pool:
-                # 限制在途历史数据数量, 防止两万只基金的 DataFrame 同时堆在内存中.
-                save_results(pool.map(prepare, targets, buffersize=workers * 2))
+        save_results(fetch_updates(prepare, targets, workers))
     logging.info("Update finished: status=%s funds=%s failed=%s", summary["status"], len(summary["funds"]),
                  sum(r["status"] in ("failed", "partial") for r in summary["funds"]))
     return summary

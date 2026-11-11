@@ -40,9 +40,9 @@ def write_batch(connection, frames: dict) -> dict:
         raise
 
 
-def upsert(connection, table: str, frame) -> dict:
+def upsert(connection, table: str, frame, *, spec: dict | None = None) -> dict:
     """统计新增, 变化和未变化记录, 仅写入新增或变化的数据."""
-    spec = TABLES[table]
+    spec = TABLES[table] if spec is None else spec
     if frame.empty:
         return {"inserted": 0, "updated": 0, "unchanged": 0}
     columns, keys = list(spec["columns"]), spec["key"]

@@ -85,6 +85,12 @@ Tushare Pro
 
 `api/ifind_client.py` 负责 HTTP 鉴权、请求、错误提示和 10 分钟内存缓存。`app/bootstrap.py` 根据会话中的数据源选择组装服务, DuckDB 服务及 iFinD 客户端在当前浏览器会话复用, 页面和服务不直接请求接口.
 
+iFinD 离线净值链路独立为 `scripts/update_ifind_nav.py -> etl/ifind_nav.py -> api/ifind_nav.py -> database/ifind_nav_store.py`. 仅写入 `data/ifind_nav.duckdb` 的净值表, 本地 Tushare 档案只读提供代码和成立日期. 在线适配器复用同一净值解析函数, 页面来源不自动切换. `research/compare_nav_sources.py` 只读两库生成抽样核对文件.
+
+两源日常更新复用 `scripts.sync_fund_list` 同步公共名单, `etl/update_scope.py` 共用批次 CSV 读取, 更新默认值和限制在途数量的取数线程池. iFinD 与 Tushare 一样默认按公共名单更新, 工作线程取数, 主线程写库, 净值覆盖筛选各自独立判断.
+
+iFinD 客户端为每个线程复用独立 HTTP Session; 更新任务通过 `nav_writer` 复用主线程写库连接, 仍保留单基金事务. 日志和摘要分别记录取数与写入耗时.
+
 ## 目录职责
 
 | 目录 | 主要文件 |
@@ -110,7 +116,7 @@ Tushare Pro
 
 当前路径定义分布在：
 
-- `database/connection.py`：`ROOT`、`DATABASE_PATH`、连接生命周期。
+- `database/connection.py`：`ROOT`、`DATABASE_PATH`、`IFIND_DATABASE_PATH`、连接生命周期。
 - `api/tushare_client.py`：项目根目录，用于定位 `.env`。
 - `app/bootstrap.py`：根据会话选择及 `DATABASE_PATH`、`NAV_CSV` 等环境变量选择实现。
 

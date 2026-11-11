@@ -51,10 +51,39 @@ TABLES = {
 }
 
 
-def initialize(connection) -> None:
-    """创建缺失的表, 不删除或自动重建已有数据. 标识符仅来自本模块常量."""
-    for table, spec in TABLES.items():
+IFIND_TABLES = {
+    "fund_nav": {
+        "columns": {"ts_code": "VARCHAR", "nav_date": "DATE",
+                    **dict.fromkeys("unit_nav accum_nav adj_nav".split(), "DECIMAL(24,10)"),
+                    "fetched_at": "TIMESTAMP"},
+        "key": ("ts_code", "nav_date"),
+    },
+}
+
+
+def _create_tables(connection, tables) -> None:
+    for table, spec in tables.items():
         columns = ", ".join(f'"{name}" {kind}' for name, kind in spec["columns"].items())
         key = ", ".join(f'"{name}"' for name in spec["key"])
         check = ', CHECK (is_open IN (0, 1))' if table == "trade_calendar" else ""
         connection.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({columns}, PRIMARY KEY ({key}){check})')
+
+
+def initialize(connection) -> None:
+    """创建缺失的表, 不删除或自动重建已有数据. 标识符仅来自本模块常量."""
+    _create_tables(connection, TABLES)
+
+
+def initialize_ifind(connection) -> None:
+    """iFinD 独立库只包含净值表, 遇到其他结构时拒绝混写."""
+    tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+    if tables - IFIND_TABLES.keys():
+        raise ValueError("目标不是 iFinD 净值专用库, 已停止写入")
+    if "fund_nav" in tables:
+        description = connection.execute("DESCRIBE fund_nav").fetchall()
+        columns = {row[0]: row[1] for row in description}
+        expected = IFIND_TABLES["fund_nav"]["columns"]
+        keys = {row[0] for row in description if row[3] == "PRI"}
+        if columns != expected or keys != set(IFIND_TABLES["fund_nav"]["key"]):
+            raise ValueError("目标净值表结构不匹配, 已停止写入")
+    _create_tables(connection, IFIND_TABLES)

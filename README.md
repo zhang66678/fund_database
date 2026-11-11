@@ -27,6 +27,8 @@ python -m venv .venv
 
 全库日常维护可运行 `.\.venv\Scripts\python.exe -m scripts.sync_fund_list`, 一次获取名单, 添加新基金并同步已有基金的资料和状态; 今天已下载名单时加 `--from-list` 复用本地快照. 同步后继续使用 `scripts.update_database` 更新净值等数据.
 
+iFinD 净值独立存入 `data/ifind_nav.duckdb`. 名单复用上述 `scripts.sync_fund_list`, 然后运行 `.\.venv\Scripts\python.exe -m scripts.update_ifind_nav --workers 4` 即可并发更新公共名单中的全库净值: 已有数据增量更新, 新基金自动回填历史. 页面暂仍使用现有来源模式. 范围筛选及核对命令见 [iFinD 独立净值库](docs/etl.md#ifind-独立净值库).
+
 ## 文档索引
 
 | 想了解 | 文档 |

@@ -11,6 +11,7 @@
 | `select_longest_funds.py` | 从最新完整快照筛选存续时间最长的基金 | 否 |
 | `fetch_fund_history.py` | 获取选中基金的净值、复权因子和分红 | 是 |
 | `audit_single_fund.py` | 单基金数据质量核查 | 是 |
+| `compare_nav_sources.py` | 只读核对 iFinD / Tushare 净值, 导出日期覆盖及数值差异 | 否 |
 
 ## 运行
 
@@ -33,6 +34,8 @@
 ## 输出
 
 研究脚本的过程日志保存到 `logs/research/`.
+
+两源净值核对结果保存到 `data/nav_comparison/时间戳/`, 包含 `nav_comparison.csv` 和 `summary.json`. 采集准备及核对命令见 [iFinD 独立净值库](../docs/etl.md#ifind-独立净值库).
 
 名单快照由 `scripts.update_fund_list` 生成：
 

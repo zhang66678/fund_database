@@ -37,6 +37,7 @@ python -m venv .venv
 | `test_log_maintenance.py` | 日志轮转, 保留期限, 清理预览及删除边界 |
 | `test_index_prices.py` | 指数历史分段, 增量更新, 失败隔离, 共同基期及缺口 |
 | `test_ifind.py` | iFinD HTTP 缓存、字段适配和 Repository 契约 |
+| `test_ifind_nav_store.py` | iFinD 净值专用库, 精确值, 增量, 失败隔离及两源核对 |
 | `test_fund_service.py` | 代码规范化、区间查询、空结果、对比与回撤 |
 | `test_fund_metrics.py` | 七项指标手算、零风险、缺口处理 |
 | `test_streamlit_app.py` | 查询、筛选、会话状态、对比页、错误反馈 |

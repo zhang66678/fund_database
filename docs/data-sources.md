@@ -141,6 +141,10 @@ IFIND_REFRESH_TOKEN=你的refresh_token
 
 成功请求按接口和参数缓存 10 分钟，每会话最多缓存 128 个结果，失败不缓存。超时为 30 秒，错误显示接口及错误码，不显示凭证或原始响应，不自动重试或切换来源。缓存结果保留原始净值获取时间，长历史取各段最早的获取时间。
 
+同一个客户端的鉴权和缓存状态加锁, 普通网络请求在状态锁外并发. 所有线程共用请求节奏, 默认间隔 0.15 秒, 最小 0.1 秒. [官方频率说明](https://quantapi.51ifind.com/gwstatic/static/ds_web/quantapi-web/help-center/faq.html) 为单函数 QPS 10(EDB 为 5), 账号总 QPS 20; 本项目目前使用的基金接口采用上述节奏. 并发参数控制同时等待的网络请求数, 不提高接口频率额度.
+
+HTTP 使用线程独立的 `requests.Session`, 同线程连续请求复用连接池, 不共享 Session 的可变状态. 净值更新脚本结束时调用 `close()` 释放各线程连接. [Requests 连接复用说明](https://requests.readthedocs.io/en/latest/user/advanced/#session-objects).
+
 ### 字段映射与范围
 
 | 接口 / 字段 | 用途 / 项目字段 |
@@ -152,6 +156,8 @@ IFIND_REFRESH_TOKEN=你的refresh_token
 | `adjustedNAV` | `adj_nav`，复权净值 |
 
 净值按最多 3 个自然年分段请求，日期为 `YYYY-MM-DD`，使用 `Interval:D,Fill:Blank`，保留缺失值。不写入现有数据库，也不构造公告日期；HTTP 历史净值返回的当前序列不提供原有 Tushare 公告版本档案。
+
+`api/ifind_nav.py` 统一净值请求和校验, 页面转换为浮点数计算, 独立采集流程按 Decimal 入库. `scripts.update_ifind_nav` 仅调用历史净值接口, 保存到独立的 `ifind_nav.duckdb`; 三种净值全空行跳过, 非空无效值或同日冲突拒绝该基金本轮写入. 此库用于两源抽样核对, 页面在线查询行为保持不变. 结构与获取时间见 [数据库说明](../database/README.md#ifind-净值专用库), 命令见 [数据流程](etl.md#ifind-独立净值库).
 
 基金代码沿用六位代码加 `.OF` 的场外基金约定，不合并份额类别。基金候选名单取自本地数据库，名单不代表 iFinD 可查询范围；单基金和对比页均可补充输入其他代码。
 

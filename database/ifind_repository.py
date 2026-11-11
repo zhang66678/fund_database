@@ -7,12 +7,10 @@ import pandas as pd
 
 from api.ifind_client import IfindClient
 from api.ifind_categories import SOURCE, fetch_categories
+from api.ifind_nav import fetch_nav
 from database.repository import ASSET_COLUMNS, BASIC_COLUMNS, DIVIDEND_COLUMNS, MANAGER_COLUMNS, NAV_COLUMNS
 
 
-NAV_FIELDS = {
-    "netAssetValue": "unit_nav", "accumulatedNAV": "accum_nav", "adjustedNAV": "adj_nav",
-}
 NAME_FIELD = "ths_fund_short_name_fund"
 FOUND_FIELD = "ths_fund_establishment_date_fund"
 DIVIDEND_FIELDS = {
@@ -98,35 +96,9 @@ class IfindFundRepository:
             start_date = basic.found_date.iloc[0].date()
         if start_date > end:
             raise ValueError("开始日期不能晚于结束日期")
-        frames, fetched = [], []
-        # 按最多 3 个自然年拆分长历史, 避免一次下载整段基金历史.
-        for year in range(start_date.year, end.year + 1, 3):
-            left = max(start_date, date(year, 1, 1))
-            right = min(end, date(year + 2, 12, 31))
-            data = self._client.query("cmd_history_quotation", {
-                "codes": ts_code, "indicators": ",".join(NAV_FIELDS),
-                "startdate": left.isoformat(), "enddate": right.isoformat(),
-                "functionpara": {"Interval": "D", "Fill": "Blank"},
-            })
-            fetched.append(data["_fetched_at"])
-            for table in data.get("tables") or []:
-                if table.get("thscode") != ts_code:
-                    raise ValueError("iFinD 返回的基金代码与请求不一致")
-                frame = pd.DataFrame({"nav_date": table.get("time", []), **(table.get("table") or {})})
-                if set(NAV_FIELDS) - set(frame.columns):
-                    raise ValueError("iFinD 净值返回缺少请求字段")
-                frame = frame.rename(columns=NAV_FIELDS).loc[:, NAV_COLUMNS]
-                frame["nav_date"] = pd.to_datetime(frame.nav_date)
-                for column in NAV_COLUMNS[1:]:
-                    frame[column] = pd.to_numeric(frame[column], errors="raise").astype(float)
-                if not frame.nav_date.between(pd.Timestamp(left), pd.Timestamp(right)).all():
-                    raise ValueError("iFinD 返回日期超出请求区间")
-                frames.append(frame)
-        nav = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=NAV_COLUMNS)
-        nav = nav.drop_duplicates().sort_values("nav_date").reset_index(drop=True)
-        if nav.nav_date.duplicated().any():
-            raise ValueError("iFinD 同一日期返回了不同净值")
-        nav.attrs["fetched_at"] = min(fetched)
+        nav = fetch_nav(self._client, ts_code, start_date, end)
+        for column in NAV_COLUMNS[1:]:
+            nav[column] = pd.to_numeric(nav[column], errors="raise").astype(float)
         return nav
 
     def get_managers(self, ts_code: str) -> pd.DataFrame:
