@@ -26,6 +26,9 @@ logs/
 *.db.wal
 *.log
 
+# Local research scripts and reports
+/research/
+
 # Editor and operating system files
 .vscode/
 .idea/

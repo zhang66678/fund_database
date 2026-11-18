@@ -281,6 +281,42 @@ ts_code
 
 命令只清理 `logs/` 中已知命名的任务摘要和过期预览目录, 保留过程日志, 演示记录和其他文件. 数据库及 `data/` 快照不在清理范围内. 当前没有定时清理任务, `--apply` 才执行删除.
 
+## 净值异常筛查与复核
+
+```powershell
+# 本地只读筛查全库, 或指定基金和日期区间
+.\.venv\Scripts\python.exe -m scripts.audit_nav
+.\.venv\Scripts\python.exe -m scripts.audit_nav --codes 006011 006210 --start-date 2026-06-02 --end-date 2026-06-02
+
+# 复核整份异常清单, 同一轮修正能确认的复权跳变
+$list = "data/nav_audit/scans/候选清单.csv"
+..\akshare\.venv\Scripts\python.exe -m scripts.audit_nav --review $list --workers 8 --apply
+```
+
+筛查按净值日取最新公告. 默认标出两种净值涨幅相差 2 个百分点以上、任一涨幅绝对值达到 20%、单位或复权净值无效的记录. 全历史范围也标出完全没有净值的基金. 可按需设置 `--gap-pp` 和 `--move-pct`. 同日集中出现的大幅偏离排在前面. `gap_days` 表示前后两笔净值的自然日间隔.
+
+筛查会核对本地已实施分红的净值除权日、分红金额、累计净值变化和复权涨幅. 能解释差异的正常区间直接排除. 主库未存份额折算比例, 可用 `--split-events <CSV>` 提供已核实的折算记录. CSV 列为 `ts_code,event_date,split_ratio`, 日期格式为 `YYYY-MM-DD`, 比例表示每份旧份额对应的新份额数. 没有核实比例、同区间有多笔事件、数值对不上或复权涨幅本身仍超阈值的记录继续列入清单.
+
+AKShare 按基金获取净值及分红、拆分数据, 在原清单附上同日期对照、两种分红算法的区间涨幅和复核状态. `consistent_with_akshare` 表示已观察到的净值和分红可解释该区间, `adj_return_discrepancy` 表示两种算法都与 Tushare 复权涨幅有明显差异. 货币基金、拆分、证据冲突或缺失由人工核对. 筛查清单默认存放在 `data/nav_audit/scans/`, 复核结果存放在 `data/nav_audit/reviews/`. 可以指定 `--output`. 筛查读取 `fund_nav` 中当前的净值.
+
+复核默认串行. `--workers` 按基金并发, 各线程共用 `--request-interval` 控制指标调用的启动间隔, 默认 0.11 秒. 可用 `--codes` 或 `--file` 选择范围. 每处理 100 只输出一次进度, 整批结束后写出结果 CSV.
+
+### 用已有复核结果修正复权净值
+
+已有 AKShare 复核 CSV 时, 直接使用其中已确认的区间收益.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.repair_nav --review data/nav_audit/reviews/复核结果.csv --apply
+```
+
+修正以断点前的本地复权净值为基准, 使用 AKShare 区间收益修正跳变, 后续日期按同一比例接续. 复核一致或证据不足的记录保留原值. `--apply` 只更新 `fund_nav.adj_nav`, 写入前自动备份原值到 `data/nav_audit/backups/`. 省略 `--apply` 时只检查结果. 写库前按日常更新要求停止 Streamlit.
+
+AKShare 已核实的收益也用于补齐本地复权空值. 筛查会同时保留缺口后的第一笔净值, 用于核对补齐后的序列能否连续接回有效净值.
+
+已有单只基金手工核对的完整修正 CSV 时, 也可用 `scripts.repair_nav --code <代码> --file <修正文件> --apply`.
+
+常规增量与全历史更新仍会覆盖重拉区间的净值. 写入前校验接入常规更新之前, 请先核对涉及已修正基金的供应商数据.
+
 ## 其他操作
 
 **只下载名单, 暂不入库:**

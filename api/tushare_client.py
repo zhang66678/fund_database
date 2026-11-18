@@ -66,7 +66,7 @@ class Source:
                 frame = self._client.query(endpoint, fields=fields, **params)
                 # 空结果也应包含请求列; 缺列不能直接当成"没有基金数据".
                 if set(fields.split(',')) - set(frame.columns):
-                    raise FetchError('Response schema missing requested columns')
+                    raise FetchError(f'{endpoint}: response schema missing requested columns')
                 LOGGER.info('%s code=%s rows=%s', endpoint, params.get('ts_code', '-'), len(frame))
                 return frame
             except Exception as exc:
@@ -84,6 +84,8 @@ class Source:
                     raise FetchError(f'{endpoint}: permission or credential error') from None
                 LOGGER.warning('%s attempt=%s failure=%s', endpoint, attempt, category)
                 if attempt == self.attempts:
+                    if isinstance(exc, FetchError):
+                        raise FetchError(f'{exc} after {attempt} attempts') from None
                     raise FetchError(f'{endpoint}: {category} after {attempt} attempts') from None
                 # 限频时等待更久; 其他临时错误按 2, 4..秒逐步延长重试等待.
                 if category != 'rate_limit':

@@ -83,3 +83,20 @@ def test_source_cannot_exceed_500_per_minute_with_shorter_configured_interval(mo
     for _ in range(4):
         source.query("fund_nav", "ts_code")
     assert starts == pytest.approx([100, 100.12, 100.24, 100.36])
+
+
+def test_missing_response_columns_preserves_actual_error_after_retries(monkeypatch):
+    class FakeClient:
+        calls = 0
+
+        def query(self, *args, **kwargs):
+            self.calls += 1
+            return pd.DataFrame()
+
+    remote = FakeClient()
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-only-token")
+    monkeypatch.setattr(client.ts, "pro_api", lambda *args, **kwargs: remote)
+    monkeypatch.setattr(client, "time", SimpleNamespace(monotonic=lambda: 100, sleep=lambda seconds: None))
+    with pytest.raises(client.FetchError, match="response schema missing requested columns"):
+        client.Source(attempts=2).query("fund_nav", "ts_code,nav_date")
+    assert remote.calls == 2
